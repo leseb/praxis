@@ -19,7 +19,7 @@ use std::{
 ///
 /// Panics if the TCP connection or write fails.
 pub fn http_send(addr: &str, request: &str) -> String {
-    let mut stream = TcpStream::connect(addr).unwrap();
+    let mut stream = tcp_connect(addr);
 
     stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     stream.write_all(request.as_bytes()).unwrap();
@@ -85,7 +85,7 @@ pub fn http_post(addr: &str, path: &str, body: &str) -> (u16, String) {
 ///
 /// Panics if the TCP connection or write fails.
 fn http_send_v6(addr: &str, request: &str) -> String {
-    let mut stream = TcpStream::connect(addr).unwrap();
+    let mut stream = tcp_connect(addr);
     stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     stream.write_all(request.as_bytes()).unwrap();
     let mut response = String::new();
@@ -124,6 +124,27 @@ pub fn json_post(path: &str, body: &str) -> String {
          {body}",
         body.len()
     )
+}
+
+// -----------------------------------------------------------------------------
+// Connection Utilities
+// -----------------------------------------------------------------------------
+
+/// Connect to `addr` with short retries on transient failures.
+///
+/// Retries up to 20 times (1 s total) before a final attempt that
+/// panics on failure. Guards against brief accept-queue gaps that
+/// can occur in CI after [`wait_for_http`] returns.
+///
+/// [`wait_for_http`]: crate::net::wait::wait_for_http
+fn tcp_connect(addr: &str) -> TcpStream {
+    for _ in 0..20 {
+        if let Ok(stream) = TcpStream::connect(addr) {
+            return stream;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    TcpStream::connect(addr).unwrap()
 }
 
 // -----------------------------------------------------------------------------
