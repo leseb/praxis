@@ -1039,6 +1039,50 @@ fn allow_open_security_filter_with_insecure_flag() {
 }
 
 #[test]
+fn errors_open_forwarded_headers_filter() {
+    let registry = FilterRegistry::with_builtins();
+    let mut entries = vec![FilterEntry {
+        branch_chains: None,
+        conditions: vec![],
+        filter_type: "forwarded_headers".into(),
+        config: serde_yaml::from_str("trusted_proxies: [\"10.0.0.0/8\"]").unwrap(),
+        name: None,
+        response_conditions: vec![],
+        failure_mode: FailureMode::Open,
+    }];
+    let pipeline = FilterPipeline::build(&mut entries, &registry).unwrap();
+    let errors = pipeline.ordering_errors(&entries, false);
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("failure_mode: open") && e.contains("forwarded_headers")),
+        "should error on open forwarded_headers filter: {errors:?}"
+    );
+}
+
+#[test]
+fn allow_open_forwarded_headers_with_insecure_flag() {
+    let registry = FilterRegistry::with_builtins();
+    let mut entries = vec![FilterEntry {
+        branch_chains: None,
+        conditions: vec![],
+        filter_type: "forwarded_headers".into(),
+        config: serde_yaml::from_str("trusted_proxies: [\"10.0.0.0/8\"]").unwrap(),
+        name: None,
+        response_conditions: vec![],
+        failure_mode: FailureMode::Open,
+    }];
+    let pipeline = FilterPipeline::build(&mut entries, &registry).unwrap();
+    let errors = pipeline.ordering_errors(&entries, true);
+    assert!(
+        !errors
+            .iter()
+            .any(|e| e.contains("failure_mode: open") && e.contains("forwarded_headers")),
+        "insecure flag should demote open forwarded_headers error to warning: {errors:?}"
+    );
+}
+
+#[test]
 fn empty_pipeline_no_errors() {
     let registry = FilterRegistry::with_builtins();
     let mut entries: Vec<FilterEntry> = vec![];

@@ -391,6 +391,36 @@ mod tests {
     }
 
     #[test]
+    fn open_forwarded_headers_filter_errors() {
+        let names = vec!["forwarded_headers"];
+        let mut pf = make_pf(vec![]);
+        pf.failure_mode = FailureMode::Open;
+        let filters = vec![pf];
+        let mut errors = Vec::new();
+        check_open_security_filters(&names, &filters, false, &mut errors);
+        assert_eq!(errors.len(), 1, "should produce exactly one error");
+        assert!(
+            errors[0].contains("failure_mode: open") && errors[0].contains("forwarded_headers"),
+            "error should mention forwarded_headers with failure_mode: open: {}",
+            errors[0]
+        );
+    }
+
+    #[test]
+    fn open_forwarded_headers_allowed_demotes_to_warning() {
+        let names = vec!["forwarded_headers"];
+        let mut pf = make_pf(vec![]);
+        pf.failure_mode = FailureMode::Open;
+        let filters = vec![pf];
+        let mut errors = Vec::new();
+        check_open_security_filters(&names, &filters, true, &mut errors);
+        assert!(
+            errors.is_empty(),
+            "allow flag should demote forwarded_headers error to warning"
+        );
+    }
+
+    #[test]
     fn open_non_security_filter_no_error() {
         let names = vec!["headers"];
         let mut pf = make_pf(vec![]);

@@ -330,6 +330,73 @@ filter_chains:
         );
     }
 
+    #[test]
+    fn resolve_pipelines_rejects_open_security_filter() {
+        let config = Config::from_yaml(
+            r#"
+listeners:
+  - name: web
+    address: "127.0.0.1:8080"
+    filter_chains: [main]
+filter_chains:
+  - name: main
+    filters:
+      - filter: ip_acl
+        allow: ["10.0.0.0/8"]
+        failure_mode: open
+      - filter: router
+        routes:
+          - path_prefix: "/"
+            cluster: backend
+      - filter: load_balancer
+        clusters:
+          - name: backend
+            endpoints: ["10.0.0.1:80"]
+"#,
+        )
+        .unwrap();
+        let registry = FilterRegistry::with_builtins();
+        let result = resolve_pipelines(&config, &registry, &empty_health_registry());
+        assert!(result.is_err(), "open security filter should fail validation");
+        let err = result.err().unwrap().to_string();
+        assert!(
+            err.contains("failure_mode: open") && err.contains("ip_acl"),
+            "error should mention open ip_acl: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_pipelines_allows_open_security_with_insecure_flag() {
+        let config = Config::from_yaml(
+            r#"
+insecure_options:
+  allow_open_security_filters: true
+listeners:
+  - name: web
+    address: "127.0.0.1:8080"
+    filter_chains: [main]
+filter_chains:
+  - name: main
+    filters:
+      - filter: ip_acl
+        allow: ["10.0.0.0/8"]
+        failure_mode: open
+      - filter: router
+        routes:
+          - path_prefix: "/"
+            cluster: backend
+      - filter: load_balancer
+        clusters:
+          - name: backend
+            endpoints: ["10.0.0.1:80"]
+"#,
+        )
+        .unwrap();
+        let registry = FilterRegistry::with_builtins();
+        let result = resolve_pipelines(&config, &registry, &empty_health_registry());
+        assert!(result.is_ok(), "allow_open_security_filters should permit open ip_acl");
+    }
+
     // -----------------------------------------------------------------------------
     // Test Utilities
     // -----------------------------------------------------------------------------
