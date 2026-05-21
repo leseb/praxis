@@ -1,3 +1,8 @@
+---
+sidebar_position: 1
+title: Filter Model
+---
+
 # Filters
 
 ## Listeners
@@ -84,26 +89,16 @@ skipped on response.
 
 ### Common Patterns
 
-See [`examples/configs/`] for working examples of every
+See [example configs](https://github.com/praxis-proxy/praxis/tree/main/examples/configs) for working examples of every
 pattern. A few highlights:
 
-- **Host-based routing**: [hosts.yaml]
-- **Path-based routing with rewriting**: [path-based-routing.yaml]
-- **Security chain** (guardrails + IP ACL): [guardrails.yaml], [ip-acl.yaml]
-- **Rate limiting with headers**: [rate-limiting.yaml]
-- **Composed filter chains**: [composed-chains.yaml]
-- **Conditional filters**: [conditional-filters.yaml]
-- **Production gateway**: [production-gateway.yaml]
-
-[`examples/configs/`]: ../examples/configs/
-[hosts.yaml]: ../examples/configs/traffic-management/hosts.yaml
-[path-based-routing.yaml]: ../examples/configs/traffic-management/path-based-routing.yaml
-[guardrails.yaml]: ../examples/configs/security/guardrails.yaml
-[ip-acl.yaml]: ../examples/configs/security/ip-acl.yaml
-[rate-limiting.yaml]: ../examples/configs/traffic-management/rate-limiting.yaml
-[composed-chains.yaml]: ../examples/configs/pipeline/composed-chains.yaml
-[conditional-filters.yaml]: ../examples/configs/pipeline/conditional-filters.yaml
-[production-gateway.yaml]: ../examples/configs/operations/production-gateway.yaml
+- **Host-based routing**: [hosts.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/hosts.yaml)
+- **Path-based routing with rewriting**: [path-based-routing.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/path-based-routing.yaml)
+- **Security chain** (guardrails + IP ACL): [guardrails.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/security/guardrails.yaml), [ip-acl.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/security/ip-acl.yaml)
+- **Rate limiting with headers**: [rate-limiting.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/rate-limiting.yaml)
+- **Composed filter chains**: [composed-chains.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/pipeline/composed-chains.yaml)
+- **Conditional filters**: [conditional-filters.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/pipeline/conditional-filters.yaml)
+- **Production gateway**: [production-gateway.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/operations/production-gateway.yaml)
 
 ## Filter Chains
 
@@ -515,7 +510,7 @@ A filter can have both `conditions` (request phase) and
 | `prompt_enrich` | AI / Inference | HTTP | Inject messages into OpenAI-compatible chat completion request bodies. Requires `ai-inference` feature. |
 
 For detailed configuration of each built-in filter, see
-[configuration.md](configuration.md).
+[Configuration](/docs/configuration/overview).
 
 ### Security Filter Restrictions
 
@@ -678,6 +673,6 @@ The YAML block under `filter: api_key` is passed as-is to
 extra code.
 
 For detailed configuration of individual built-in filters,
-see [configuration.md](configuration.md). For best
+see [Configuration](/docs/configuration/overview). For best
 practices when writing custom filters, see
-[extensions.md](extensions.md).
+[Custom Filters](custom-filters).

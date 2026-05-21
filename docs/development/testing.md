@@ -1,3 +1,8 @@
+---
+sidebar_position: 2
+title: Testing
+---
+
 # Development
 
 ## Requirements
@@ -10,12 +15,10 @@
 ## Conventions
 
 **All contributors must read and understand
-[conventions.md] before contributing.** The conventions
+[Contributing](/docs/development/contributing) before contributing.** The conventions
 cover code style, testing requirements, file
 organization, and security practices. Submissions
 that do not follow these conventions will be rejected.
-
-[conventions.md]:./conventions.md
 
 ## Build
 
@@ -46,14 +49,14 @@ produce a warning. All crates enforce
 `unsafe_code = "deny"` in workspace lints and Clippy runs with
 `-D warnings` (zero tolerance).
 
-See [architecture.md](architecture.md) for workspace layout
+See [System Design](/docs/architecture/system-design) for workspace layout
 and crate dependencies.
-See [security-hardening.md](security-hardening.md) for
+See [Hardening Guide](/docs/security/hardening) for
 deployment guidance.
 
 ## Adding a new Built-in Filter
 
-Review [extensions.md] first.
+Review [Custom Filters](/docs/filters/custom-filters) first.
 
 1. Create the filter module under
    `filter/src/builtins/<protocol>/<category>/`.
@@ -69,8 +72,6 @@ Review [extensions.md] first.
    `tests/integration/tests/suite/examples/`.
 7. Update `examples/README.md` to list any new or renamed
    example configs.
-
-[extensions.md]:./extensions.md
 
 ## Adding a Protocol
 
@@ -186,4 +187,4 @@ status checks.
 
 ## Performance & Benchmarking
 
-See [benchmarks.md](./benchmarks.md).
+See [Benchmarks](benchmarks).

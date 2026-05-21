@@ -1,3 +1,8 @@
+---
+sidebar_position: 8
+title: Custom Filters
+---
+
 # Extensions
 
 Praxis is designed to be extended. The core library provides
@@ -284,7 +289,7 @@ filter_chains:
 Custom filters participate identically to built-ins: same
 ordering, context access, and short-circuit capability.
 
-See [filters.md](filters.md) for extensive documentation.
+See [Filter Model](filter-model) for extensive documentation.
 
 ## Best Practices
 
@@ -447,5 +452,6 @@ Use the integration test utilities (`free_port`,
 end-to-end tests for custom filters. Register your
 filter with `FilterFactory::Http(Arc::new(factory))`,
 build a minimal YAML config, and assert on status codes
-and response bodies. See `tests/integration/` for
+and response bodies. See the
+[test suite](https://github.com/praxis-proxy/praxis/tree/main/tests/integration) for
 examples.

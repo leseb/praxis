@@ -1,8 +1,13 @@
+---
+sidebar_position: 1
+title: Overview
+---
+
 # Configuration
 
 Single YAML file, passed as CLI argument or set via the
 `PRAXIS_CONFIG` environment variable. See
-`examples/configs/` for working examples.
+[example configs](https://github.com/praxis-proxy/praxis/tree/main/examples/configs) for working examples.
 
 ## Structure
 
@@ -85,9 +90,7 @@ their state on reload. Operators should expect a brief
 burst window for rate limiters and a closed circuit for
 circuit breakers immediately after reload.
 
-See [hot-reload.yaml] for an example.
-
-[hot-reload.yaml]: ../examples/configs/operations/hot-reload.yaml
+See [hot-reload.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/operations/hot-reload.yaml) for an example.
 
 ## Admin
 
@@ -273,9 +276,7 @@ connection lifetime (TCP) and released automatically on
 completion, error, or timeout. Each listener has an
 independent limit.
 
-See [max-connections.yaml] for an example.
-
-[max-connections.yaml]: ../examples/configs/operations/max-connections.yaml
+See [max-connections.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/operations/max-connections.yaml) for an example.
 
 ### Mixed Protocols
 
@@ -295,7 +296,7 @@ listeners:
     upstream: "10.0.0.1:5432"
 ```
 
-See [tls.md](tls.md) for TLS details.
+See [TLS & mTLS](/docs/protocols/tls) for TLS details.
 
 ## Filter Chains
 
@@ -405,12 +406,8 @@ requests with all specified header values present (AND
 semantics, case-sensitive). Routes without `host` match
 any host.
 
-Example configs: [path-based-routing.yaml],
-[hosts.yaml], [canary-routing.yaml].
-
-[path-based-routing.yaml]: ../examples/configs/traffic-management/path-based-routing.yaml
-[hosts.yaml]: ../examples/configs/traffic-management/hosts.yaml
-[canary-routing.yaml]: ../examples/configs/traffic-management/canary-routing.yaml
+Example configs: [path-based-routing.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/path-based-routing.yaml),
+[hosts.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/hosts.yaml), [canary-routing.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/canary-routing.yaml).
 
 ### Load Balancing
 
@@ -422,12 +419,8 @@ Strategies:
 - `consistent_hash`: hashes a request header (or URI path
   as fallback) to pin requests to stable endpoints
 
-Example configs: [weighted-load-balancing.yaml],
-[least-connections.yaml], [session-affinity.yaml].
-
-[weighted-load-balancing.yaml]: ../examples/configs/traffic-management/weighted-load-balancing.yaml
-[least-connections.yaml]: ../examples/configs/traffic-management/least-connections.yaml
-[session-affinity.yaml]: ../examples/configs/traffic-management/session-affinity.yaml
+Example configs: [weighted-load-balancing.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/weighted-load-balancing.yaml),
+[least-connections.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/least-connections.yaml), [session-affinity.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/session-affinity.yaml).
 
 Cluster-level options: `connection_timeout_ms`,
 `total_connection_timeout_ms`, `idle_timeout_ms`,
@@ -439,7 +432,7 @@ TCP connect and TLS handshake. When used alongside
 TLS handshake budget. It must be >= `connection_timeout_ms`.
 
 Cluster `tls` enables TLS to the upstream. See
-[tls.md](tls.md) for full details on upstream TLS, mTLS,
+[TLS & mTLS](/docs/protocols/tls) for full details on upstream TLS, mTLS,
 CA trust, and certificate verification.
 
 #### Health Checks
@@ -447,9 +440,7 @@ CA trust, and certificate verification.
 Clusters support active health checks via the
 `health_check` field. Endpoints that fail consecutive
 probes are removed from load balancer rotation until they
-recover. See [health-checks.yaml].
-
-[health-checks.yaml]: ../examples/configs/traffic-management/health-checks.yaml
+recover. See [health-checks.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/health-checks.yaml).
 
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
@@ -579,7 +570,7 @@ requests and strips client-provided credentials to
 prevent forwarding. Pair with a source discriminator
 (IP ACL, client authentication) to control which
 clients receive credential upgrades. See
-[credential-injection.yaml].
+[credential-injection.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/ai/credential-injection.yaml).
 
 ```yaml
 - filter: credential_injection
@@ -599,8 +590,6 @@ clients receive credential upgrades. See
 | `clusters[].env_var` | string | one of | Environment variable containing the credential |
 | `clusters[].header_prefix` | string | no | Prefix prepended to the value (e.g. `"Bearer "`) |
 | `clusters[].strip_client_credential` | bool | no | Remove client-sent value before injection (default: true) |
-
-[credential-injection.yaml]: ../examples/configs/ai/credential-injection.yaml
 
 ### TCP Access Log
 
@@ -795,7 +784,7 @@ failures. When consecutive upstream failures reach the
 threshold, the circuit opens and subsequent requests
 receive 503 immediately. After the recovery window, a
 single probe request is forwarded; if it succeeds the
-circuit closes. See [circuit-breaker.yaml].
+circuit closes. See [circuit-breaker.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/circuit-breaker.yaml).
 
 ```yaml
 - filter: circuit_breaker
@@ -810,8 +799,6 @@ circuit closes. See [circuit-breaker.yaml].
 | `clusters[].name` | string | yes | Cluster name to protect |
 | `clusters[].consecutive_failures` | integer | yes | Failures before opening |
 | `clusters[].recovery_window_secs` | integer | yes | Seconds before half-open probe |
-
-[circuit-breaker.yaml]: ../examples/configs/traffic-management/circuit-breaker.yaml
 
 ### Guardrails
 
@@ -849,9 +836,7 @@ default) to inspect the full request body.
 ### CORS
 
 Spec-compliant CORS filter with preflight handling, origin
-validation, and credential support. See [cors.yaml].
-
-[cors.yaml]: ../examples/configs/security/cors.yaml
+validation, and credential support. See [cors.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/security/cors.yaml).
 
 | Field | Type | Default | Description |
 | ------- | ------ | --------- | ------------- |
@@ -877,9 +862,7 @@ validation. Safe methods (GET, HEAD, OPTIONS by default)
 bypass the check. State-changing methods require an
 `Origin` or `Referer` header matching the trusted
 origins. Rejected requests receive 403 Forbidden.
-See [csrf.yaml].
-
-[csrf.yaml]: ../examples/configs/security/csrf.yaml
+See [csrf.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/security/csrf.yaml).
 
 ```yaml
 - filter: csrf
@@ -923,9 +906,7 @@ Returns a 3xx redirect without contacting any upstream:
 Rewrites the request path before forwarding to upstream.
 Exactly one of `strip_prefix`, `add_prefix`, or `replace`
 per filter instance. Query strings are preserved. See
-[path-rewriting.yaml].
-
-[path-rewriting.yaml]: ../examples/configs/transformation/path-rewriting.yaml
+[path-rewriting.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/transformation/path-rewriting.yaml).
 
 | Field | Type | Description |
 | ------- | ------ | ------------- |
@@ -939,16 +920,12 @@ per filter instance. Query strings are preserved. See
 Regex-based path transformation and query string
 manipulation. Operations applied in order:
 `regex_replace`, `strip_query_params`,
-`add_query_params`. See [url-rewriting.yaml].
-
-[url-rewriting.yaml]: ../examples/configs/transformation/url-rewriting.yaml
+`add_query_params`. See [url-rewriting.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/transformation/url-rewriting.yaml).
 
 ### Compression
 
 Gzip, brotli, and zstd response compression. All three
-enabled by default. See [compression.yaml].
-
-[compression.yaml]: ../examples/configs/payload-processing/compression.yaml
+enabled by default. See [compression.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/payload-processing/compression.yaml).
 
 | Field | Type | Default | Description |
 | ------- | ------ | --------- | ------------- |
@@ -968,9 +945,7 @@ OpenAI-compatible chat completion request bodies. The
 filter parses the JSON body, splices configured messages
 into the `messages` array, re-serializes, and updates
 `Content-Length`. Requires the `ai-inference` feature.
-See [prompt-enrichment.yaml].
-
-[prompt-enrichment.yaml]: ../examples/configs/ai/prompt-enrichment.yaml
+See [prompt-enrichment.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/ai/prompt-enrichment.yaml).
 
 ```yaml
 - filter: prompt_enrich
@@ -1003,9 +978,7 @@ predicates: `path` (exact match), `path_prefix`,
 `methods`, `headers`. All fields within a condition are
 ANDed. Use `response_conditions` with `status` or
 `headers` predicates to gate response hooks. See
-[conditional-filters.yaml].
-
-[conditional-filters.yaml]: ../examples/configs/pipeline/conditional-filters.yaml
+[conditional-filters.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/pipeline/conditional-filters.yaml).
 
 Request conditions gate both request and body hooks.
 Response conditions gate only `on_response` and response
@@ -1099,7 +1072,7 @@ runtime:
 ```
 
 This **replaces** the system trust store (not additive).
-See [tls.md](tls.md) for details on CA trust
+See [TLS & mTLS](/docs/protocols/tls) for details on CA trust
 precedence and combined bundles.
 
 ### Logging
@@ -1194,11 +1167,8 @@ on `/` (exact match) and 404 elsewhere. The default binds
 to localhost only, preventing accidental exposure to
 public networks during initial setup. This allows zero
 config startup for testing. The source lives in
-[default.yaml]. For a realistic starting point, see
-[basic-reverse-proxy.yaml].
-
-[default.yaml]: ../core/src/config/default.yaml
-[basic-reverse-proxy.yaml]: ../examples/configs/traffic-management/basic-reverse-proxy.yaml
+[default.yaml](https://github.com/praxis-proxy/praxis/blob/main/core/src/config/default.yaml). For a realistic starting point, see
+[basic-reverse-proxy.yaml](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/traffic-management/basic-reverse-proxy.yaml).
 
 ## Example Configs
 
@@ -1221,7 +1191,7 @@ by category:
 
 Praxis validates configuration at startup and fails
 closed. Ambiguous or risky settings are errors, not
-warnings. Insecure overrides (see [development.md])
+warnings. Insecure overrides (see [Testing](/docs/development/testing))
 require explicit opt-in and emit warnings at startup.
 
 Key validations: listener name uniqueness, filter chain
@@ -1260,6 +1230,4 @@ At runtime:
 ## Overrides
 
 Some validations and features can be overridden for development
-and testing purposes. See `insecure_options` in [development.md].
-
-[development.md]:./development.md#insecure-options
+and testing purposes. See `insecure_options` in [Testing](/docs/development/testing#insecure-options).

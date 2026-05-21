@@ -1,3 +1,8 @@
+---
+sidebar_position: 1
+title: Contributing
+---
+
 # Development Conventions
 
 ## Coding Style
@@ -22,10 +27,7 @@
 - **cargo-deny**: Enforce supply chain safety policies
 - **rustdoc**: Generate the API documentation
 - **cargo xtask**: Developer task runner for benchmarks, flamegraphs, and debug utilities
-- **benchmarks**: Criterion microbenchmarks and scenario-based load tests ([Fortio], [Vegeta])
-
-[Fortio]: https://github.com/fortio/fortio
-[Vegeta]: https://github.com/tsenart/vegeta
+- **benchmarks**: Criterion microbenchmarks and scenario-based load tests ([Fortio](https://github.com/fortio/fortio), [Vegeta](https://github.com/tsenart/vegeta))
 
 ### Comments vs Tracing
 
@@ -82,8 +84,6 @@ assert_eq!(status, 403);
 assert_eq!(status, 403, "ACL should block loopback");
 ```
 
-[benchmarked]:./benchmarks.md
-
 ### RFC Conformance
 
 When implementing protocol-level behavior (HTTP semantics,
@@ -108,7 +108,7 @@ and verify conformance against them.
 ### Rules, Practices & Lints
 
 Security is enforced at the lint level. See lints in
-[Cargo.toml] for the full set.
+[Cargo.toml](https://github.com/praxis-proxy/praxis/blob/main/Cargo.toml) for the full set.
 
 - `unsafe_code = "deny"` in workspace lints (no
   exceptions; unsafe belongs upstream)
@@ -122,10 +122,7 @@ Security is enforced at the lint level. See lints in
 - Only add dependencies with well-established
   reputation
 - `cargo audit` and `cargo deny check` enforce supply
-  chain safety (see [development.md])
-
-[Cargo.toml]:../Cargo.toml
-[development.md]:./development.md
+  chain safety (see [Testing](testing))
 
 #### Type Design
 

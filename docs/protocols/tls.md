@@ -1,43 +1,33 @@
+---
+sidebar_position: 3
+title: TLS & mTLS
+---
+
 # TLS
 
 Working example configs for every TLS scenario live in
-[`examples/configs/protocols/`]:
+[`examples/configs/protocols/`](https://github.com/praxis-proxy/praxis/tree/main/examples/configs/protocols):
 
 | Example | Scenario |
 | ------- | -------- |
-| [tls-termination] | HTTPS listener, plain HTTP upstream |
-| [tls-http-reencrypt] | HTTPS listener, TLS upstream |
-| [tls-multi-cert] | SNI with multiple certificates |
-| [tls-version-constraint] | TLS 1.3 only |
-| [tls-mtls-listener] | Require client certificate |
-| [tls-mtls-listener-request] | Request (optional) client cert |
-| [tls-mtls-upstream] | Client cert to upstream |
-| [tls-mtls-both] | mTLS on both sides |
-| [tls-verify-disabled] | Skip upstream cert verify (dev) |
-| [upstream-tls] | Plain listener, TLS upstream |
-| [upstream-ca-file] | Global CA for all upstreams |
-| [tcp-tls-termination] | TLS on TCP listener |
-| [tcp-tls-mtls] | mTLS on TCP listener |
-
-[`examples/configs/protocols/`]: ../examples/configs/protocols/
-[tls-termination]: ../examples/configs/protocols/tls-termination.yaml
-[tls-http-reencrypt]: ../examples/configs/protocols/tls-http-reencrypt.yaml
-[tls-multi-cert]: ../examples/configs/protocols/tls-multi-cert.yaml
-[tls-version-constraint]: ../examples/configs/protocols/tls-version-constraint.yaml
-[tls-mtls-listener]: ../examples/configs/protocols/tls-mtls-listener.yaml
-[tls-mtls-listener-request]: ../examples/configs/protocols/tls-mtls-listener-request.yaml
-[tls-mtls-upstream]: ../examples/configs/protocols/tls-mtls-upstream.yaml
-[tls-mtls-both]: ../examples/configs/protocols/tls-mtls-both.yaml
-[tls-verify-disabled]: ../examples/configs/protocols/tls-verify-disabled.yaml
-[upstream-tls]: ../examples/configs/protocols/upstream-tls.yaml
-[upstream-ca-file]: ../examples/configs/protocols/upstream-ca-file.yaml
-[tcp-tls-termination]: ../examples/configs/protocols/tcp-tls-termination.yaml
-[tcp-tls-mtls]: ../examples/configs/protocols/tcp-tls-mtls.yaml
+| [tls-termination](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-termination.yaml) | HTTPS listener, plain HTTP upstream |
+| [tls-http-reencrypt](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-http-reencrypt.yaml) | HTTPS listener, TLS upstream |
+| [tls-multi-cert](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-multi-cert.yaml) | SNI with multiple certificates |
+| [tls-version-constraint](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-version-constraint.yaml) | TLS 1.3 only |
+| [tls-mtls-listener](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-mtls-listener.yaml) | Require client certificate |
+| [tls-mtls-listener-request](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-mtls-listener-request.yaml) | Request (optional) client cert |
+| [tls-mtls-upstream](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-mtls-upstream.yaml) | Client cert to upstream |
+| [tls-mtls-both](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-mtls-both.yaml) | mTLS on both sides |
+| [tls-verify-disabled](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-verify-disabled.yaml) | Skip upstream cert verify (dev) |
+| [upstream-tls](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/upstream-tls.yaml) | Plain listener, TLS upstream |
+| [upstream-ca-file](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/upstream-ca-file.yaml) | Global CA for all upstreams |
+| [tcp-tls-termination](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tcp-tls-termination.yaml) | TLS on TCP listener |
+| [tcp-tls-mtls](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tcp-tls-mtls.yaml) | mTLS on TCP listener |
 
 ## Listener TLS
 
 Add `tls` to any listener. PEM format; the cert file
-may include the full chain. See [tls-termination] for
+may include the full chain. See [tls-termination](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-termination.yaml) for
 a complete example.
 
 ```yaml
@@ -57,7 +47,7 @@ match single-level subdomains. Mark exactly one entry with
 SNI. An entry without `server_names` that is not marked
 `default: true` is rejected as ambiguous. If no entry
 has `default: true`, unmatched SNI is rejected (no
-fallback). See [tls-multi-cert].
+fallback). See [tls-multi-cert](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-multi-cert.yaml).
 
 ### Certificate Hot-Reload
 
@@ -98,7 +88,7 @@ certificate rotation.
 
 `min_version` restricts the minimum protocol version:
 `tls12` (default) or `tls13`. See
-[tls-version-constraint].
+[tls-version-constraint](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-version-constraint.yaml).
 
 ### Listener mTLS
 
@@ -112,8 +102,8 @@ Require or request client certificates with
 | `require` | Reject connections without a valid client cert |
 
 `client_ca` is required when mode is `request` or
-`require`. See [tls-mtls-listener] and
-[tls-mtls-listener-request].
+`require`. See [tls-mtls-listener](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-mtls-listener.yaml) and
+[tls-mtls-listener-request](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-mtls-listener-request.yaml).
 
 ### Local dev with mkcert
 
@@ -129,12 +119,12 @@ Point `cert_path` and `key_path` at the generated files.
 Add `tls:` to a cluster to TLS-connect to endpoints.
 `sni` sets the backend SNI hostname. `verify` controls
 certificate verification (default: `true`). See
-[upstream-tls] and [tls-verify-disabled].
+[upstream-tls](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/upstream-tls.yaml) and [tls-verify-disabled](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-verify-disabled.yaml).
 
 ### Upstream mTLS (Client Certificate)
 
 Present a client certificate to upstream servers.
-See [tls-mtls-upstream] and [tls-mtls-both].
+See [tls-mtls-upstream](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-mtls-upstream.yaml) and [tls-mtls-both](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/tls-mtls-both.yaml).
 
 ## CA Trust
 
@@ -150,14 +140,14 @@ Three levels of CA trust, evaluated in order:
 The global CA **replaces** the system trust store (not
 additive). If backends use both a private CA and
 public CAs, create a combined PEM bundle. See
-[upstream-ca-file].
+[upstream-ca-file](https://github.com/praxis-proxy/praxis/blob/main/examples/configs/protocols/upstream-ca-file.yaml).
 
 ## Timeouts
 
 Pingora enforces a 60-second TLS handshake timeout
 (hardcoded). For total connection budgets (TCP + TLS),
 use `total_connection_timeout_ms` on the cluster. See
-[configuration.md](configuration.md) for details.
+[Configuration](/docs/configuration/overview) for details.
 
 ## Certificate and Key Security
 

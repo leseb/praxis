@@ -53,6 +53,7 @@ endif
 	check-prereqs \
 	check-prereqs-cmake \
 	check-prereqs-nightly \
+	website website-dev \
 	help
 
 # Uses --version rather than command -v so we catch broken installs.
@@ -232,6 +233,16 @@ run-debug:
 	cargo xtask debug
 
 # -------------------------------------------------------------------
+# Website
+# -------------------------------------------------------------------
+
+website: ## Build the website
+	cd website && npm run build
+
+website-dev: ## Start website dev server
+	cd website && npm start
+
+# -------------------------------------------------------------------
 # Binutils
 # -------------------------------------------------------------------
 
@@ -379,3 +390,7 @@ help:
 	@echo "Dev tools:"
 	@echo "  run-echo             start echo server (xtask)"
 	@echo "  run-debug            start debug server (xtask)"
+	@echo ""
+	@echo "Website:"
+	@echo "  website              build the website"
+	@echo "  website-dev          start website dev server"

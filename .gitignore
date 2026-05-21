@@ -31,7 +31,12 @@ coverage.json
 .claude/*
 !.claude/CLAUDE.md
 
-# Docs are markdown only
-docs/**/
-!docs/
-!docs/proposals/
+# Docs spec files
+docs/superpowers/
+
+# Website
+website/node_modules/
+website/.docusaurus/
+website/build/
+.superpowers/
+.gstack/

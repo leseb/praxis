@@ -1,3 +1,8 @@
+---
+sidebar_position: 1
+title: Hardening Guide
+---
+
 # Security Hardening Guide
 
 Security is a primary motivation of Praxis, not an
@@ -59,7 +64,7 @@ ambiguous configuration:
   are deprecated and Praxis will not negotiate them.
 - Rotate certificates before expiration. Single-cert
   listeners hot-reload certificates automatically
-  (see [tls.md](tls.md)). Multi-cert listeners require
+  (see [TLS & mTLS](/docs/protocols/tls)). Multi-cert listeners require
   a restart.
 - Use separate certificate entries with `server_names`
   for multi-domain deployments (SNI routing).
