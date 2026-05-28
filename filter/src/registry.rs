@@ -158,6 +158,12 @@ fn register_http_builtins(factories: &mut HashMap<String, FilterFactory>) {
     #[cfg(feature = "ai-inference")]
     register_http(
         factories,
+        "request_validate",
+        crate::builtins::RequestValidateFilter::from_config,
+    );
+    #[cfg(feature = "ai-inference")]
+    register_http(
+        factories,
         "responses_format",
         crate::builtins::ResponsesFormatFilter::from_config,
     );
@@ -276,6 +282,11 @@ mod tests {
         );
         #[cfg(feature = "ai-inference")]
         assert!(names.contains(&"prompt_enrich"), "prompt_enrich should be registered");
+        #[cfg(feature = "ai-inference")]
+        assert!(
+            names.contains(&"request_validate"),
+            "request_validate should be registered"
+        );
         #[cfg(feature = "ai-inference")]
         assert!(
             names.contains(&"responses_format"),

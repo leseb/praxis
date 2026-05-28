@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Praxis Contributors
 
-//! Responses API format classifier filter.
+//! Responses API filters: format classifier and request validation.
 //!
-//! Classifies request bodies as Responses API, Chat Completions,
-//! unknown JSON, invalid JSON, or non-JSON. Promotes classification
-//! facts to configurable headers, durable metadata, and filter
-//! results for routing. Does not mutate the request body.
+//! The `responses_format` classifier detects whether a request is
+//! Responses API or Chat Completions and promotes routing facts to
+//! metadata. The `request_validate` filter runs after the classifier
+//! to validate parameter combinations and extract additional fields.
 
 pub(crate) mod classify;
 mod config;
@@ -276,3 +276,9 @@ fn promote_filter_results(
 
     Ok(())
 }
+
+#[cfg(feature = "ai-inference")]
+pub(crate) mod request_validate;
+
+#[cfg(feature = "ai-inference")]
+pub use request_validate::RequestValidateFilter;
