@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Praxis Contributors
 
-//! OpenAI Responses API store utilities.
+//! `OpenAI` Responses API store utilities.
 //!
 //! Helpers that operate on the generic [`ResponseStore`] but are
-//! specific to the OpenAI Responses API (e.g., input item
+//! specific to the `OpenAI` Responses API (e.g., input item
 //! pagination for the `/v1/responses/{id}/input_items` endpoint).
 //!
 //! [`ResponseStore`]: crate::builtins::http::ai::store::ResponseStore

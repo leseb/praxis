@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Praxis Contributors
 
-//! Input item pagination for the OpenAI Responses API.
+//! Input item pagination for the `OpenAI` Responses API.
 
 use crate::builtins::http::ai::store::{ListParams, ResponseRecord, StoreError};
 
@@ -9,7 +9,7 @@ use crate::builtins::http::ai::store::{ListParams, ResponseRecord, StoreError};
 // InputItemPage
 // -----------------------------------------------------------------------------
 
-/// A page of input items from an OpenAI Responses API response.
+/// A page of input items from an `OpenAI` Responses API response.
 pub struct InputItemPage {
     /// Input items as JSON values (heterogeneous types).
     pub data: Vec<serde_json::Value>,
@@ -29,7 +29,7 @@ pub struct InputItemPage {
 ///
 /// Items are extracted from the stored `input` JSON column and
 /// paginated in memory using an offset-based cursor. This is
-/// specific to the OpenAI Responses API `/v1/responses/{id}/input_items`
+/// specific to the `OpenAI` Responses API `/v1/responses/{id}/input_items`
 /// endpoint.
 ///
 /// # Errors
@@ -44,7 +44,7 @@ pub fn list_input_items(record: &ResponseRecord, params: &ListParams) -> Result<
     let offset = params
         .cursor
         .as_deref()
-        .map(|c| c.parse::<usize>())
+        .map(str::parse::<usize>)
         .transpose()
         .map_err(|e| StoreError::Database(format!("invalid input_items cursor: {e}")))?
         .unwrap_or(0);

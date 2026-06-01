@@ -29,7 +29,7 @@ pub(crate) struct TableNames {
 ///
 /// Each statement uses `IF NOT EXISTS` so it is safe to run on
 /// every startup. The schema uses TEXT for JSON columns (standard
-/// SQLite pattern).
+/// `SQLite` pattern).
 ///
 /// # Errors
 ///

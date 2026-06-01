@@ -9,10 +9,10 @@ use std::fmt;
 // Constants
 // -----------------------------------------------------------------------------
 
-/// Default page size for list operations (matches OpenAI default).
+/// Default page size for list operations (matches `OpenAI` default).
 pub(crate) const DEFAULT_PAGE_LIMIT: u32 = 20;
 
-/// Maximum page size for list operations (matches OpenAI maximum).
+/// Maximum page size for list operations (matches `OpenAI` maximum).
 pub(crate) const MAX_PAGE_LIMIT: u32 = 100;
 
 // -----------------------------------------------------------------------------
@@ -75,19 +75,14 @@ pub struct ConversationRecord {
 // -----------------------------------------------------------------------------
 
 /// Sort order for list operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Order {
     /// Oldest first.
     Ascending,
 
     /// Newest first.
+    #[default]
     Descending,
-}
-
-impl Default for Order {
-    fn default() -> Self {
-        Self::Descending
-    }
 }
 
 /// Cursor-based pagination parameters.
@@ -118,7 +113,7 @@ impl Default for ListParams {
 impl ListParams {
     /// Return the effective limit, clamped to `1..=[MAX_PAGE_LIMIT]`.
     pub(crate) fn effective_limit(&self) -> u32 {
-        self.limit.max(1).min(MAX_PAGE_LIMIT)
+        self.limit.clamp(1, MAX_PAGE_LIMIT)
     }
 }
 

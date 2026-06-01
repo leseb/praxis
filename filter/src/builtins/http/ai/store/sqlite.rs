@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Praxis Contributors
 
-//! [`SqliteResponseStore`] — SQLite backend for the response store.
+//! [`SqliteResponseStore`] — `SQLite` backend for the response store.
 
 use async_trait::async_trait;
 use sqlx::{Row, SqlitePool, sqlite::SqliteConnectOptions};
@@ -9,7 +9,7 @@ use tracing::info;
 
 use super::{
     schemas::{TableNames, generate_ddl},
-    store::ResponseStore,
+    trait_def::ResponseStore,
     types::{ConversationRecord, ListParams, Order, ResponsePage, ResponseRecord, StoreError},
 };
 
@@ -32,7 +32,7 @@ pub struct SqliteResponseStore {
 impl SqliteResponseStore {
     /// Create a new store and initialize the schema.
     ///
-    /// The `database_url` is a SQLite connection string. Use
+    /// The `database_url` is a `SQLite` connection string. Use
     /// `"sqlite::memory:"` for in-memory databases (testing) or
     /// `"sqlite:///path/to/db.sqlite?mode=rwc"` for file-backed.
     ///
@@ -44,6 +44,7 @@ impl SqliteResponseStore {
     ///
     /// Returns [`StoreError::Database`] if the connection, schema
     /// initialization, or table name validation fails.
+    #[allow(clippy::cognitive_complexity, reason = "sequential setup steps with error mapping")]
     pub async fn new(database_url: &str, responses_table: &str, conversations_table: &str) -> Result<Self, StoreError> {
         let options: SqliteConnectOptions = database_url
             .parse()
@@ -75,6 +76,7 @@ impl SqliteResponseStore {
 }
 
 #[async_trait]
+#[allow(clippy::too_many_lines, reason = "trait impl groups related CRUD operations")]
 impl ResponseStore for SqliteResponseStore {
     async fn upsert_response(&self, record: &ResponseRecord) -> Result<(), StoreError> {
         let response_object =

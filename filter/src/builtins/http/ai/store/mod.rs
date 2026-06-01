@@ -20,7 +20,7 @@
 
 mod schemas;
 mod sqlite;
-mod store;
+mod trait_def;
 mod types;
 
 #[cfg(test)]
@@ -41,7 +41,7 @@ use dashmap::{DashMap, mapref::entry::Entry};
 
 #[allow(unused_imports, reason = "re-exports for upcoming response store filter and tests")]
 pub use self::types::{ConversationRecord, ListParams, Order, ResponsePage, ResponseRecord, StoreError};
-pub use self::{sqlite::SqliteResponseStore, store::ResponseStore};
+pub use self::{sqlite::SqliteResponseStore, trait_def::ResponseStore};
 
 // -----------------------------------------------------------------------------
 // ResponseStoreRegistry
@@ -62,6 +62,7 @@ pub use self::{sqlite::SqliteResponseStore, store::ResponseStore};
 /// ```
 pub struct ResponseStoreRegistry {
     /// Named store backends.
+    #[allow(clippy::type_complexity, reason = "nested Arc for concurrent registry access")]
     stores: Arc<DashMap<Arc<str>, Arc<dyn ResponseStore>>>,
 }
 

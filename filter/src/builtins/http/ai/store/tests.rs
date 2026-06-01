@@ -9,7 +9,7 @@ use serde_json::json;
 
 use super::{
     ConversationRecord, ListParams, Order, ResponseRecord, ResponseStoreRegistry, SqliteResponseStore,
-    store::ResponseStore, types::StoreError,
+    trait_def::ResponseStore, types::StoreError,
 };
 use crate::builtins::http::ai::openai::responses::store::list_input_items;
 
