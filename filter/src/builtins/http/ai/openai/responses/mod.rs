@@ -10,6 +10,8 @@
 
 pub(crate) mod classifier;
 mod config;
+#[allow(dead_code, reason = "store utilities for upcoming Responses API CRUD endpoints")]
+pub(crate) mod store;
 
 #[cfg(test)]
 #[allow(
