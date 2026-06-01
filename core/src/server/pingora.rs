@@ -79,6 +79,7 @@ pub fn build_http_server(shutdown_timeout_secs: u64, runtime: &RuntimeOptions) -
 }
 
 /// Build a [`ServerConf`] from runtime options.
+#[allow(clippy::cognitive_complexity, reason = "builder configuration with many fields")]
 fn build_server_conf(shutdown_timeout_secs: u64, threads: usize, runtime: &RuntimeOptions) -> ServerConf {
     let mut conf = ServerConf {
         grace_period_seconds: Some(shutdown_timeout_secs),
