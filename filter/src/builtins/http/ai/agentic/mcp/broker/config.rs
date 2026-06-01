@@ -295,6 +295,7 @@ fn validate_unique_exposed_names(catalog: &[CatalogTool]) -> Result<(), FilterEr
 }
 
 /// Build the static tool catalog from configured servers.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing: validation and catalog assembly")]
 fn build_catalog(servers: &[McpServerConfig], policy: InvalidToolPolicy) -> Result<Vec<CatalogTool>, FilterError> {
     let mut catalog = Vec::new();
     for server in servers {

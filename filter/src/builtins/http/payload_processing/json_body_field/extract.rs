@@ -13,6 +13,7 @@ use tracing::{trace, warn};
 
 /// Extract mapped JSON fields into request headers, skipping values
 /// that are not safe header values. Returns `true` if any field was promoted.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing: field iteration with safety checks")]
 pub(super) fn extract_fields(
     mappings: &[(String, String)],
     value: &serde_json::Value,

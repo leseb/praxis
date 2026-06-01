@@ -243,6 +243,7 @@ fn check_unbounded_stream_buffer(direction: &str, mode: BodyMode, allow_unbounde
 ///
 /// When `failure_mode` is [`FailureMode::Open`], the error is logged as a
 /// warning and `Ok(())` is returned so the caller can continue.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing: failure mode open/closed branching")]
 pub(crate) fn check_failure_mode(
     filter_name: &str,
     error: FilterError,

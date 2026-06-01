@@ -115,6 +115,7 @@ impl RateLimitFilter {
     ///
     /// Rejects unknown IPs when the map exceeds [`HARD_CAP_PER_IP_ENTRIES`]
     /// to prevent unbounded memory growth via address rotation.
+    #[allow(clippy::cognitive_complexity, reason = "pre-existing: IP acquisition with eviction and cap logic")]
     fn acquire_per_ip(
         &self,
         map: &DashMap<IpAddr, TokenBucket>,

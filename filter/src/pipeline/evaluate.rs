@@ -28,6 +28,7 @@ pub(crate) fn evaluate_branches<'a>(
 }
 
 /// Inner implementation of branch evaluation.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing: branch condition/rejoin dispatch")]
 async fn evaluate_branches_inner(
     branches: &[ResolvedBranch],
     ctx: &mut HttpFilterContext<'_>,
@@ -128,6 +129,7 @@ async fn execute_branch_filters(
 ///
 /// Returns `Some(action)` when the parent should stop iteration
 /// (terminal or reject), `None` to continue.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing: outcome variant dispatch")]
 async fn dispatch_nested_outcome(
     branches: &[ResolvedBranch],
     ctx: &mut HttpFilterContext<'_>,
