@@ -72,10 +72,6 @@ pub(in crate::http) fn normalize_request_headers(session: &mut Session) -> Optio
 
 /// Reject requests where a single-value header appears multiple
 /// times with differing values. Identical duplicates are collapsed.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 fn reject_conflicting_single_value_headers(session: &mut Session) -> Option<Rejection> {
     for header_name in SINGLE_VALUE_HEADERS {
         let values: Vec<_> = session.req_header().headers.get_all(header_name).iter().collect();
@@ -142,10 +138,6 @@ fn unfold_obs_fold(value: &[u8]) -> Vec<u8> {
 ///
 /// Rejects the request if obs-fold is found in security-sensitive
 /// headers. For other headers, replaces obs-fold with a single SP.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 fn handle_obs_fold(session: &mut Session) -> Option<Rejection> {
     for name in OBS_FOLD_REJECT_HEADERS {
         if let Some(value) = session.req_header().headers.get(name)

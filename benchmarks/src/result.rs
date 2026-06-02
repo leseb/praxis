@@ -346,10 +346,6 @@ impl ScenarioResults {
     /// If `stability_cv` is `Some(max_cv)`, runs with a coefficient
     /// of variation exceeding `max_cv` are marked as skipped rather
     /// than evaluated.
-    #[allow(
-        clippy::cognitive_complexity,
-        reason = "pre-existing complexity exposed by dependency graph change"
-    )]
     pub fn compare(&self, baseline: &ScenarioResults, threshold: f64, stability_cv: Option<f64>) -> ComparativeResults {
         if let Some(max_cv) = stability_cv
             && !self.is_stable(max_cv)

@@ -170,10 +170,6 @@ impl HttpFilterContext<'_> {
     /// (e.g. `mcp.method`, `a2a.task_id`). Keys are limited to
     /// 64 bytes and values to 256 bytes to bound per-request
     /// memory growth.
-    #[allow(
-        clippy::cognitive_complexity,
-        reason = "pre-existing: validation guards on key/value lengths"
-    )]
     pub fn set_metadata(&mut self, key: impl Into<String>, value: impl Into<String>) {
         let key = key.into();
         let value = value.into();

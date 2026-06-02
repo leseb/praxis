@@ -30,7 +30,6 @@ mod types;
     clippy::indexing_slicing,
     clippy::panic,
     clippy::too_many_lines,
-    clippy::cognitive_complexity,
     reason = "tests"
 )]
 mod tests;

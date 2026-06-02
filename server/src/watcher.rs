@@ -85,10 +85,6 @@ pub(crate) fn spawn_config_watcher(params: WatcherParams) -> std::thread::JoinHa
 
 /// Core watch loop: set up the notify watcher, debounce events,
 /// and trigger reloads.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 async fn watch_loop(params: WatcherParams) {
     let (tx, mut rx) = mpsc::channel::<()>(16);
 
@@ -107,10 +103,6 @@ async fn watch_loop(params: WatcherParams) {
 }
 
 /// Process filesystem events until shutdown is requested.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 async fn run_event_loop(rx: &mut mpsc::Receiver<()>, params: &WatcherParams) {
     let mut current_config = params.initial_config.clone();
     loop {
@@ -136,12 +128,7 @@ async fn run_event_loop(rx: &mut mpsc::Receiver<()>, params: &WatcherParams) {
 }
 
 /// Read the config file, parse it, and attempt a reload.
-#[allow(
-    clippy::cognitive_complexity,
-    clippy::too_many_arguments,
-    clippy::too_many_lines,
-    reason = "orchestration function"
-)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines, reason = "orchestration function")]
 fn handle_reload(
     config_path: &PathBuf,
     current_config: &mut Config,
@@ -195,10 +182,6 @@ fn handle_reload(
 /// on relevant filesystem events.
 ///
 /// [`RecommendedWatcher`]: notify::RecommendedWatcher
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 fn setup_watcher(tx: mpsc::Sender<()>, watch_dir: &std::path::Path) -> Result<RecommendedWatcher, notify::Error> {
     let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
         Ok(event) if is_relevant_event(event.kind) && tx.try_send(()).is_err() => {

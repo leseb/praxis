@@ -157,7 +157,6 @@ impl CsrfFilter {
     }
 
     /// Either reject the request or log a warning in log-only mode.
-    #[allow(clippy::cognitive_complexity, reason = "pre-existing: reject/log branching")]
     fn reject_or_log(&self, method: &str, origin: Option<&str>, reason: &str) -> FilterAction {
         if self.is_log_only() {
             warn!(

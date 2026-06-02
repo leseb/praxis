@@ -77,10 +77,6 @@ async fn build_peer(upstream: &Upstream) -> Result<Box<HttpPeer>> {
 /// Apply pre-cached TLS settings to an [`HttpPeer`].
 ///
 /// [`HttpPeer`]: pingora_core::upstreams::peer::HttpPeer
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 fn apply_cached_tls(peer: &mut HttpPeer, tls: &praxis_tls::CachedClusterTls, address: &str) {
     if !tls.verify() {
         tracing::debug!(upstream = %address, "upstream TLS verification disabled for this peer");
@@ -125,10 +121,6 @@ fn client_cert_from_cached(cached: &praxis_tls::CachedClientCert) -> pingora_cor
 /// if the host is an IP address (IP-based SNI is not standard per [RFC 6066]).
 ///
 /// [RFC 6066]: https://datatracker.ietf.org/doc/html/rfc6066
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 fn derive_sni(address: &str) -> String {
     let host = address.rsplit_once(':').map_or(address, |(h, _)| h);
     if host.parse::<std::net::IpAddr>().is_ok() {

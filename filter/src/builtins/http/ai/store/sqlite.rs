@@ -44,7 +44,6 @@ impl SqliteResponseStore {
     ///
     /// Returns [`StoreError::Database`] if the connection, schema
     /// initialization, or table name validation fails.
-    #[allow(clippy::cognitive_complexity, reason = "sequential setup steps with error mapping")]
     pub async fn new(database_url: &str, responses_table: &str, conversations_table: &str) -> Result<Self, StoreError> {
         let options: SqliteConnectOptions = database_url
             .parse()

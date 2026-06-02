@@ -182,7 +182,6 @@ impl FilterPipeline {
 /// TCP filters do not support conditions or branching; these fields
 /// are silently ignored at runtime. Logging at build time helps
 /// operators catch misconfigurations.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing: TCP field warning checks")]
 fn warn_tcp_unsupported_fields(filter: &AnyFilter, entry: &FilterEntry) {
     if !matches!(filter, AnyFilter::Tcp(_)) {
         return;

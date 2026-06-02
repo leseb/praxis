@@ -171,7 +171,6 @@ fn handle_parse_error(e: envelope::JsonRpcParseError, config: &JsonRpcConfig) ->
 }
 
 /// Promote JSON-RPC envelope metadata to request headers.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing: header promotion branches")]
 fn promote_to_headers(
     envelope: &JsonRpcEnvelope,
     config: &JsonRpcConfig,

@@ -251,7 +251,6 @@ impl CorsFilter {
     }
 
     /// Handle a preflight OPTIONS request.
-    #[allow(clippy::cognitive_complexity, reason = "pre-existing: preflight validation branches")]
     fn handle_preflight(&self, origin: &str, request: &crate::context::Request) -> FilterAction {
         if self.resolve_origin(origin).is_none() {
             debug!(origin = %origin, "preflight origin disallowed");

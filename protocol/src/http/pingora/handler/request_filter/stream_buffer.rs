@@ -86,12 +86,7 @@ pub(super) enum PreReadError {
 /// `json_body_field` extracting a model name). The accumulated body
 /// is stored in `ctx.pre_read_body` for later forwarding by
 /// `request_body_filter`.
-#[allow(
-    clippy::too_many_lines,
-    clippy::cognitive_complexity,
-    unused_assignments,
-    reason = "buffer management orchestration"
-)]
+#[allow(clippy::too_many_lines, unused_assignments, reason = "buffer management orchestration")]
 pub(super) async fn pre_read_body(
     pipeline: &FilterPipeline,
     session: &mut Session,

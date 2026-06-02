@@ -51,7 +51,6 @@ impl CachedCaCerts {
     /// certificates, or has invalid PEM encoding.
     ///
     /// [`TlsError`]: crate::TlsError
-    #[allow(clippy::cognitive_complexity, reason = "linear validation, not genuinely complex")]
     pub fn from_pem_file(ca_path: &str) -> Result<Self, TlsError> {
         tracing::debug!(ca_path, "loading CA certificates");
 
@@ -121,7 +120,6 @@ impl CachedClientCert {
     /// no valid PEM data, or the key file has no private key.
     ///
     /// [`TlsError`]: crate::TlsError
-    #[allow(clippy::cognitive_complexity, reason = "linear validation, not genuinely complex")]
     pub fn from_pem_files(cert_path: &str, key_path: &str) -> Result<Self, TlsError> {
         tracing::debug!(cert_path, key_path, "loading client certificate");
 

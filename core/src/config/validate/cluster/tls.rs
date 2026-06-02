@@ -21,7 +21,6 @@ use crate::{
 /// [`InsecureOptions`].
 ///
 /// [`InsecureOptions`]: crate::config::InsecureOptions
-#[allow(clippy::cognitive_complexity, reason = "validation with many independent checks")]
 pub(super) fn validate_tls_settings(cluster: &Cluster, insecure_options: &InsecureOptions) -> Result<(), ProxyError> {
     let Some(ref tls) = cluster.tls else {
         return Ok(());

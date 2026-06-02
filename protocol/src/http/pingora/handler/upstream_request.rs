@@ -30,10 +30,6 @@ use super::{
 /// as `h2c` are always stripped to prevent smuggling attacks.
 ///
 /// [RFC 6455]: https://datatracker.ietf.org/doc/html/rfc6455
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 pub(crate) fn strip_hop_by_hop(req: &mut RequestHeader, is_upgrade: bool) {
     let is_ws = is_upgrade && is_websocket_request(&req.headers);
     let conn_values = hop_by_hop::snapshot_connection_values(&req.headers);

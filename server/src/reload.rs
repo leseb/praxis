@@ -145,10 +145,7 @@ fn log_restart_required_changes(old: &Config, new: &Config) {
 }
 
 /// Detect listener additions, removals, and address rebinds.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
+#[allow(clippy::cognitive_complexity, reason = "add/remove/rebind detection branches")]
 fn detect_listener_topology_changes(old: &Config, new: &Config) {
     let old_names: std::collections::HashSet<&str> = old.listeners.iter().map(|l| l.name.as_str()).collect();
     let new_names: std::collections::HashSet<&str> = new.listeners.iter().map(|l| l.name.as_str()).collect();
@@ -197,10 +194,6 @@ fn detect_protocol_changes(old: &Config, new: &Config) {
 }
 
 /// Detect compression being added to a previously uncompressed listener.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 fn detect_compression_additions(old: &Config, new: &Config) {
     let old_chains_with_compression = find_chains_with_compression(old);
 
@@ -238,10 +231,6 @@ fn find_chains_with_compression(config: &Config) -> std::collections::HashSet<&s
 }
 
 /// Detect TLS enable/disable toggles.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 fn detect_tls_toggles(old: &Config, new: &Config) {
     for new_l in &new.listeners {
         if let Some(old_l) = old.listeners.iter().find(|l| l.name == new_l.name) {

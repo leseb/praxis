@@ -100,10 +100,6 @@ pub(super) enum BodyFilterOutcome {
 ///
 /// When `failure_mode` is [`FailureMode::Open`], errors are logged as
 /// warnings and the filter is treated as if it returned `Continue`.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing: body result classification with failure mode"
-)]
 pub(super) fn dispatch_body_result(
     result: Result<FilterAction, FilterError>,
     filter_name: &str,
@@ -156,10 +152,6 @@ pub(super) fn skip_by_response_conditions(
 ///
 /// When `failure_mode` is [`FailureMode::Open`], errors are logged as
 /// warnings and the filter is treated as if it returned `Continue`.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing: response filter with header tracking"
-)]
 pub(super) async fn run_response_filter(
     http_filter: &dyn crate::filter::HttpFilter,
     ctx: &mut HttpFilterContext<'_>,

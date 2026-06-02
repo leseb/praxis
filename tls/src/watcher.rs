@@ -148,10 +148,6 @@ async fn watch_loop(
 /// on relevant filesystem events.
 ///
 /// [`RecommendedWatcher`]: notify::RecommendedWatcher
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "event matching branches, not genuinely complex"
-)]
 fn setup_watcher(tx: mpsc::Sender<()>, cert_dir: &Path, key_dir: &Path) -> Result<RecommendedWatcher, notify::Error> {
     let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
         Ok(event) if is_relevant_event(event.kind) && tx.try_send(()).is_err() => {
@@ -198,10 +194,6 @@ async fn drain_and_debounce(
 /// Attempt to reload the certificate, logging success or failure.
 ///
 /// Returns `true` on success, `false` on failure.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "match arms with logging, not genuinely complex"
-)]
 fn reload_cert(current: &Arc<ArcSwap<CertifiedKey>>, pair: &CertKeyPair) -> bool {
     match loader::load_certified_key(pair) {
         Ok(certified) => {

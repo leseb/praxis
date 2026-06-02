@@ -79,10 +79,7 @@ pub fn resolve_pipelines(
 
 /// Run pipeline ordering validation; either fail or warn depending
 /// on the `skip` flag.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
+#[allow(clippy::cognitive_complexity, reason = "validation with warn/error branches")]
 fn validate_pipeline(
     pipeline: &FilterPipeline,
     entries: &[praxis_core::config::FilterEntry],

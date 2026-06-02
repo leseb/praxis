@@ -34,10 +34,6 @@ pub(crate) async fn run_benchmarks(args: Args) {
 
 /// Resolve the Praxis Docker image: use the override if provided,
 /// otherwise build from local source.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 fn resolve_praxis_image(args: &Args) -> String {
     if let Some(image) = &args.image {
         tracing::info!(image, "using provided praxis image");
@@ -49,10 +45,6 @@ fn resolve_praxis_image(args: &Args) -> String {
 }
 
 /// Execute all scenarios across all proxies.
-#[allow(
-    clippy::cognitive_complexity,
-    reason = "pre-existing complexity exposed by dependency graph change"
-)]
 async fn run_all_scenarios(
     proxy_names: &[String],
     scenarios: &[benchmarks::scenario::Scenario],

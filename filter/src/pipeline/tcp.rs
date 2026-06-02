@@ -22,10 +22,6 @@ impl FilterPipeline {
     /// # Errors
     ///
     /// Returns [`FilterError`] if any filter rejects or fails.
-    #[allow(
-        clippy::cognitive_complexity,
-        reason = "pre-existing: TCP filter iteration with failure mode"
-    )]
     pub async fn execute_tcp_connect(&self, ctx: &mut TcpFilterContext<'_>) -> Result<FilterAction, FilterError> {
         for pf in &self.filters {
             let tcp_filter = match &pf.filter {
@@ -50,10 +46,6 @@ impl FilterPipeline {
     /// # Errors
     ///
     /// Returns [`FilterError`] if any filter fails.
-    #[allow(
-        clippy::cognitive_complexity,
-        reason = "pre-existing: TCP disconnect filter iteration"
-    )]
     pub async fn execute_tcp_disconnect(&self, ctx: &mut TcpFilterContext<'_>) -> Result<(), FilterError> {
         for pf in self.filters.iter().rev() {
             let tcp_filter = match &pf.filter {
