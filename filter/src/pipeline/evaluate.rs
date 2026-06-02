@@ -28,7 +28,10 @@ pub(crate) fn evaluate_branches<'a>(
 }
 
 /// Inner implementation of branch evaluation.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing: branch condition/rejoin dispatch")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing: branch condition/rejoin dispatch"
+)]
 async fn evaluate_branches_inner(
     branches: &[ResolvedBranch],
     ctx: &mut HttpFilterContext<'_>,

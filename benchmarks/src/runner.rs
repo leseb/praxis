@@ -135,7 +135,10 @@ impl Runner {
     }
 
     /// Start the Fortio echo backend.
-    #[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+    #[allow(
+        clippy::cognitive_complexity,
+        reason = "pre-existing complexity exposed by dependency graph change"
+    )]
     async fn start_backend(&self) -> Result<tokio::process::Child, BenchmarkError> {
         info!(port = self.backend_port, "starting Fortio echo backend");
         let backend = fortio::start_echo_server(self.backend_port)?;
@@ -146,7 +149,10 @@ impl Runner {
     }
 
     /// Start the proxy process, cleaning up stale containers first.
-    #[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+    #[allow(
+        clippy::cognitive_complexity,
+        reason = "pre-existing complexity exposed by dependency graph change"
+    )]
     async fn start_proxy(&self, proxy: &dyn ProxyConfig) -> Result<tokio::process::Child, BenchmarkError> {
         if let Some(name) = proxy.container_name() {
             info!(container = name, "removing stale container from previous run");
@@ -166,7 +172,10 @@ impl Runner {
     }
 
     /// Wait for the proxy to become healthy.
-    #[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+    #[allow(
+        clippy::cognitive_complexity,
+        reason = "pre-existing complexity exposed by dependency graph change"
+    )]
     async fn wait_for_proxy(&self, proxy: &dyn ProxyConfig) -> Result<(), BenchmarkError> {
         info!(proxy = proxy.name(), "waiting for proxy health");
         if let Some(url) = proxy.health_url() {
@@ -179,7 +188,10 @@ impl Runner {
     }
 
     /// Execute all measurement runs, returning aggregated results.
-    #[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+    #[allow(
+        clippy::cognitive_complexity,
+        reason = "pre-existing complexity exposed by dependency graph change"
+    )]
     async fn run_measurement_rounds(&self, proxy: &dyn ProxyConfig) -> Result<ScenarioResults, BenchmarkError> {
         info!(runs = self.scenario.runs, "starting measurement runs");
         let mut results = ScenarioResults {
@@ -198,7 +210,10 @@ impl Runner {
     }
 
     /// Stop proxy and backend processes.
-    #[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+    #[allow(
+        clippy::cognitive_complexity,
+        reason = "pre-existing complexity exposed by dependency graph change"
+    )]
     async fn cleanup(
         &self,
         proxy: &dyn ProxyConfig,

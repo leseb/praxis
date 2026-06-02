@@ -137,7 +137,10 @@ impl GuardrailsFilter {
     }
 
     /// Check all header-targeted rules against the request headers.
-    #[allow(clippy::cognitive_complexity, reason = "pre-existing: rule iteration with negate logic")]
+    #[allow(
+        clippy::cognitive_complexity,
+        reason = "pre-existing: rule iteration with negate logic"
+    )]
     fn check_headers(&self, ctx: &HttpFilterContext<'_>) -> bool {
         for rule in &self.rules {
             let RuleTarget::Header(ref header_name) = rule.target else {
@@ -167,7 +170,10 @@ impl GuardrailsFilter {
     }
 
     /// Check all body-targeted rules against the request body.
-    #[allow(clippy::cognitive_complexity, reason = "pre-existing: rule iteration with negate logic")]
+    #[allow(
+        clippy::cognitive_complexity,
+        reason = "pre-existing: rule iteration with negate logic"
+    )]
     fn check_body(&self, body: &str) -> bool {
         for rule in &self.rules {
             if !matches!(rule.target, RuleTarget::Body) {

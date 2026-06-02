@@ -117,7 +117,10 @@ fn build_health_params(
 }
 
 /// Main loop for a single cluster's health check task.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 async fn run_health_check_loop(params: &HealthCheckParams, shutdown: CancellationToken) {
     debug!(cluster = %params.cluster_name, "health check loop started");
 
@@ -152,7 +155,10 @@ async fn probe_all_endpoints(params: &HealthCheckParams) {
 }
 
 /// Spawn a single endpoint probe future.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 async fn spawn_probe(idx: usize, addr: String, params: &HealthCheckParams) -> (usize, String, bool) {
     debug!(
         cluster = %params.cluster_name,
@@ -173,7 +179,10 @@ async fn spawn_probe(idx: usize, addr: String, params: &HealthCheckParams) -> (u
 
 /// Record a probe result, updating health state and logging transitions.
 #[allow(clippy::indexing_slicing, reason = "bounds checked")]
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 fn record_probe_result(params: &HealthCheckParams, idx: usize, addr: &str, success: bool) {
     if idx >= params.state.endpoints().len() {
         return;

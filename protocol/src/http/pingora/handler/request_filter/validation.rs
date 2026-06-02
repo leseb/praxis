@@ -27,7 +27,10 @@ use super::stream_buffer::build_trace_response;
 ///
 /// [RFC 9110 Section 7.2]: https://datatracker.ietf.org/doc/html/rfc9110#section-7.2
 /// [RFC 9112 Section 3.2]: https://datatracker.ietf.org/doc/html/rfc9112#section-3.2
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 pub(super) fn validate_host_header(session: &mut Session) -> Option<Rejection> {
     let is_http11 = session.req_header().version == http::Version::HTTP_11;
     let hosts = session.req_header().headers.get_all(http::header::HOST);
@@ -79,7 +82,10 @@ pub(super) fn validate_host_header(session: &mut Session) -> Option<Rejection> {
 /// For non-TRACE/OPTIONS methods, or when the header is absent, returns `None`.
 ///
 /// [RFC 9110 Section 7.6.2]: https://datatracker.ietf.org/doc/html/rfc9110#section-7.6.2
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 pub(super) async fn handle_max_forwards(session: &mut Session) -> Option<bool> {
     let method = &session.req_header().method;
     if !matches!(*method, http::Method::TRACE | http::Method::OPTIONS) {

@@ -47,7 +47,10 @@ use super::hop_by_hop::{self, RESPONSE_HOP_BY_HOP};
 /// ```
 ///
 /// [RFC 6455]: https://datatracker.ietf.org/doc/html/rfc6455
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 pub(crate) fn strip_hop_by_hop_response(resp: &mut ResponseHeader, is_upgrade_response: bool) {
     let is_ws = is_upgrade_response && is_websocket_response(&resp.headers);
     let conn_values = hop_by_hop::snapshot_connection_values(&resp.headers);

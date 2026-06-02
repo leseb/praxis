@@ -30,7 +30,10 @@ use tokio::sync::watch;
 /// [`build_server_config`]: praxis_tls::setup::build_server_config
 /// [`ReloadableCertResolver`]: praxis_tls::reload::ReloadableCertResolver
 /// [`CertWatcher`]: praxis_tls::watcher::CertWatcher
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 pub(crate) fn build_tls_settings(
     tls: &ListenerTls,
     address: &str,

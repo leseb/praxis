@@ -72,7 +72,10 @@ async fn run_response_pipeline(
 /// Headers were taken from the Pingora response via [`std::mem::take`] earlier,
 /// so they must always be restored. We re-insert through Pingora's API to keep
 /// the internal `header_name_map` consistent with the `HeaderMap`.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 fn handle_response_result(
     result: std::result::Result<FilterAction, praxis_filter::FilterError>,
     upstream_response: &mut pingora_http::ResponseHeader,

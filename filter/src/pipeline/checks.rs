@@ -81,7 +81,11 @@ pub(super) fn check_conditional_security(names: &[&str], filters: &[PipelineFilt
 /// Security filters with `failure_mode: open` (bypass risk on error).
 ///
 /// When `allow` is `true`, the error is demoted to a warning.
-#[allow(clippy::indexing_slicing, clippy::cognitive_complexity, reason = "pre-existing: enumeration bounds with warn/error branching")]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::cognitive_complexity,
+    reason = "pre-existing: enumeration bounds with warn/error branching"
+)]
 pub(super) fn check_open_security_filters(
     names: &[&str],
     filters: &[PipelineFilter],
@@ -131,7 +135,10 @@ pub(super) fn check_duplicate_load_balancers(names: &[&str], errors: &mut Vec<St
 
 /// Every cluster selected by a pipeline filter must be defined by the
 /// load balancer that will consume `ctx.cluster`.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing: cluster cross-referencing logic")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing: cluster cross-referencing logic"
+)]
 pub(super) fn check_misaligned_clusters(entries: &[FilterEntry], errors: &mut Vec<String>) {
     let selected_clusters = super::clusters::extract_selected_clusters(entries);
     let lb_clusters = super::clusters::extract_lb_clusters(entries);
@@ -161,7 +168,11 @@ pub(super) fn check_misaligned_clusters(entries: &[FilterEntry], errors: &mut Ve
 }
 
 /// Multiple path rewriting filters (`path_rewrite` / `url_rewrite`).
-#[allow(clippy::indexing_slicing, clippy::cognitive_complexity, reason = "pre-existing: checked before usage with rewrite dedup logic")]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::cognitive_complexity,
+    reason = "pre-existing: checked before usage with rewrite dedup logic"
+)]
 pub(super) fn check_duplicate_rewrite_filters(names: &[&str], entries: &[FilterEntry], errors: &mut Vec<String>) {
     let rewrite_indices: Vec<usize> = names
         .iter()

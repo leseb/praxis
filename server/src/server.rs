@@ -222,7 +222,10 @@ fn enforce_root_check(_config: &Config) {}
 /// strict check (e.g. `0644`). The warning gives operators visibility without
 /// blocking legitimate deployments.
 #[cfg(unix)]
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 fn warn_insecure_key_permissions(config: &Config) {
     use std::os::unix::fs::PermissionsExt;
 

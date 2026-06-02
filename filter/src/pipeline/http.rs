@@ -74,7 +74,10 @@ impl FilterPipeline {
     /// Returns [`FilterError`] if any filter fails.
     ///
     /// [`executed_filter_indices`]: HttpFilterContext::executed_filter_indices
-    #[allow(clippy::cognitive_complexity, reason = "pre-existing: response filter iteration with skip logic")]
+    #[allow(
+        clippy::cognitive_complexity,
+        reason = "pre-existing: response filter iteration with skip logic"
+    )]
     pub async fn execute_http_response(&self, ctx: &mut HttpFilterContext<'_>) -> Result<FilterAction, FilterError> {
         for (idx, pf) in self.filters.iter().enumerate().rev() {
             if ctx.executed_filter_indices.get(idx) == Some(&false) {
@@ -109,7 +112,11 @@ impl FilterPipeline {
     /// Returns [`FilterError`] if any body filter fails.
     ///
     /// [`BodyDone`]: FilterAction::BodyDone
-    #[allow(clippy::indexing_slicing, clippy::cognitive_complexity, reason = "pre-existing: idx bounded by filters.len(); body filter dispatch")]
+    #[allow(
+        clippy::indexing_slicing,
+        clippy::cognitive_complexity,
+        reason = "pre-existing: idx bounded by filters.len(); body filter dispatch"
+    )]
     pub async fn execute_http_request_body(
         &self,
         ctx: &mut HttpFilterContext<'_>,
@@ -154,7 +161,11 @@ impl FilterPipeline {
     /// Returns [`FilterError`] if any body filter fails.
     ///
     /// [`BodyDone`]: FilterAction::BodyDone
-    #[allow(clippy::indexing_slicing, clippy::cognitive_complexity, reason = "pre-existing: idx bounded by filters.len(); response body filter dispatch")]
+    #[allow(
+        clippy::indexing_slicing,
+        clippy::cognitive_complexity,
+        reason = "pre-existing: idx bounded by filters.len(); response body filter dispatch"
+    )]
     pub fn execute_http_response_body(
         &self,
         ctx: &mut HttpFilterContext<'_>,
@@ -219,7 +230,10 @@ enum RequestFilterResult {
 }
 
 /// Run a single request filter, handling conditions and tracing.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing: request filter dispatch with failure mode")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing: request filter dispatch with failure mode"
+)]
 async fn run_request_filter(
     pf: &PipelineFilter,
     ctx: &mut HttpFilterContext<'_>,

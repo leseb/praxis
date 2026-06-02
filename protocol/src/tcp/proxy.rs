@@ -120,7 +120,10 @@ impl PingoraTcpProxy {
     }
 
     /// Inner forwarding logic, optionally wrapped in a max-duration timeout.
-    #[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+    #[allow(
+        clippy::cognitive_complexity,
+        reason = "pre-existing complexity exposed by dependency graph change"
+    )]
     async fn forward_inner(
         &self,
         session: &mut Stream,
@@ -277,7 +280,10 @@ impl ServerApp for PingoraTcpProxy {
 // -----------------------------------------------------------------------------
 
 /// Execute connect filters and resolve the upstream address.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 async fn resolve_connect_result(
     pipeline: &FilterPipeline,
     ctx: &mut TcpFilterContext<'_>,
@@ -333,7 +339,10 @@ enum SniPeekResult {
 /// Returns `(sni_hostname, peeked_bytes)`. The peeked bytes must be
 /// forwarded to the upstream before starting bidirectional copy.
 #[allow(clippy::indexing_slicing, reason = "filled <= buf.len() maintained by loop")]
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 async fn peek_sni(session: &mut Stream) -> (Option<String>, Vec<u8>) {
     let mut buf = vec![0u8; PEEK_INITIAL];
     let mut filled = 0;
@@ -362,7 +371,10 @@ async fn peek_sni(session: &mut Stream) -> (Option<String>, Vec<u8>) {
 }
 
 /// Process a read chunk during SNI peeking.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 fn handle_sni_read(buf: &mut Vec<u8>, filled: usize) -> PeekAction {
     match try_parse_sni(buf, filled) {
         SniPeekResult::Parsed(info) => {
@@ -420,7 +432,10 @@ fn extract_addrs(session: &Stream) -> (String, String) {
 }
 
 /// Forward with an idle timeout, returning `None` on shutdown or timeout.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 async fn forward_with_timeout(
     copy_future: impl Future<Output = io::Result<(u64, u64)>>,
     shutdown_rx: &mut watch::Receiver<bool>,
@@ -454,7 +469,10 @@ async fn forward_no_timeout(
 }
 
 /// Connect to the upstream TCP address with a timeout.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 async fn connect_upstream(upstream_addr: &str) -> Option<TcpStream> {
     match tokio::time::timeout(UPSTREAM_CONNECT_TIMEOUT, TcpStream::connect(upstream_addr)).await {
         Ok(Ok(s)) => Some(s),

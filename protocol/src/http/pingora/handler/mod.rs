@@ -149,7 +149,10 @@ where
 // -----------------------------------------------------------------------------
 
 /// Apply compression settings from the pipeline config to the Pingora response.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 fn adjust_compression(
     session: &mut Session,
     upstream_response: &pingora_http::ResponseHeader,
@@ -193,7 +196,10 @@ fn adjust_compression(
 ///
 /// Body-mutating filters can change payload length after `request_filter`,
 /// so the retry guard uses the larger of the original and mutated lengths.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 fn handle_connect_failure(ctx: &mut PingoraRequestCtx, e: Box<pingora_core::Error>) -> Box<pingora_core::Error> {
     if ctx.request_is_idempotent {
         let mutated_len = ctx.mutated_request_body_len.unwrap_or(0) as u64;
@@ -302,7 +308,10 @@ fn record_passive_health(pipeline: &FilterPipeline, error: Option<&pingora_core:
 }
 
 /// Apply passive health threshold for a single endpoint observation.
-#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "pre-existing complexity exposed by dependency graph change"
+)]
 fn apply_passive_threshold(
     health: &praxis_core::health::ClusterHealthEntry,
     idx: usize,
