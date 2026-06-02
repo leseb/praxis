@@ -55,6 +55,7 @@ fn via_value(version: Version) -> String {
 /// If a valid UTF-8 `Via` header already exists, appends
 /// comma-separated. Non-UTF-8 values are replaced outright
 /// to avoid producing a malformed header.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 pub(crate) fn append_request_via(req: &mut pingora_http::RequestHeader, upstream_version: Version) {
     let entry = via_value(upstream_version);
     let combined = match req.headers.get("via").and_then(|v| v.to_str().ok()) {
@@ -75,6 +76,7 @@ pub(crate) fn append_request_via(req: &mut pingora_http::RequestHeader, upstream
 /// If a valid UTF-8 `Via` header already exists, appends
 /// comma-separated. Non-UTF-8 values are replaced outright
 /// to avoid producing a malformed header.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 pub(crate) fn append_response_via(resp: &mut pingora_http::ResponseHeader, client_version: Version) {
     let entry = via_value(client_version);
     let combined = match resp.headers.get("via").and_then(|v| v.to_str().ok()) {

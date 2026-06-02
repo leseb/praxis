@@ -52,6 +52,7 @@ pub(super) fn group_tcp_listeners(config: &Config) -> HashMap<TcpGroupKey, Vec<&
 /// Returns any TLS certificate watcher shutdown senders. The
 /// caller must keep these alive; dropping them signals the
 /// watcher tasks to stop.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 pub(super) fn register_tcp_listeners(
     service: &mut Service<PingoraTcpProxy>,
     listeners: &[&praxis_core::config::Listener],

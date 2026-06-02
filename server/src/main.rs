@@ -47,7 +47,11 @@ struct Cli {
 // -----------------------------------------------------------------------------
 
 /// Entry point.
-#[allow(clippy::print_stderr, reason = "fatal error output")]
+#[allow(
+    clippy::cognitive_complexity,
+    clippy::print_stderr,
+    reason = "fatal error output; pre-existing complexity exposed by dependency graph change"
+)]
 fn main() {
     let cli = Cli::parse();
     let explicit = cli.config.or_else(|| std::env::var("PRAXIS_CONFIG").ok());

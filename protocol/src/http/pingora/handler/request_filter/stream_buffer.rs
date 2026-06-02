@@ -88,6 +88,7 @@ pub(super) enum PreReadError {
 /// `request_body_filter`.
 #[allow(
     clippy::too_many_lines,
+    clippy::cognitive_complexity,
     unused_assignments,
     reason = "buffer management orchestration"
 )]

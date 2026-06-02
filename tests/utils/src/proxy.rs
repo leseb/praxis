@@ -123,6 +123,7 @@ impl fmt::Display for ProxyGuard {
 }
 
 impl Drop for ProxyGuard {
+    #[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
     fn drop(&mut self) {
         self.notify.notify_one();
         if let Some(handle) = self.handle.take() {

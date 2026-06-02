@@ -39,6 +39,7 @@ pub async fn http_probe(addr: &str, path: &str, expected_status: u16, timeout: D
 
 /// Inner HTTP probe logic (no timeout wrapper).
 #[allow(clippy::indexing_slicing, reason = "bounded by read length")]
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 async fn http_probe_inner(addr: &str, path: &str, expected_status: u16) -> bool {
     let mut stream = match TcpStream::connect(addr).await {
         Ok(s) => s,
@@ -152,6 +153,7 @@ pub async fn h2_probe(addr: &str, timeout: Duration) -> bool {
 }
 
 /// Inner HTTP/2 probe logic (no timeout wrapper).
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 async fn h2_probe_inner(addr: &str) -> bool {
     let mut stream = match TcpStream::connect(addr).await {
         Ok(s) => s,
@@ -174,6 +176,7 @@ async fn h2_probe_inner(addr: &str) -> bool {
 }
 
 /// Send the HTTP/2 connection preface and initial SETTINGS frame.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 async fn h2_send_preface(stream: &mut TcpStream, addr: &str) -> bool {
     if let Err(e) = stream.write_all(H2_PREFACE).await {
         trace!(addr, error = %e, "h2 health check preface write failed");
@@ -187,6 +190,7 @@ async fn h2_send_preface(stream: &mut TcpStream, addr: &str) -> bool {
 }
 
 /// Read the server's response and verify it contains a SETTINGS frame.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 async fn h2_read_settings(stream: &mut TcpStream, addr: &str) -> bool {
     let mut buf = [0u8; 64];
     let n = match stream.read(&mut buf).await {
@@ -252,6 +256,7 @@ pub(crate) fn is_settings_frame(buf: &[u8]) -> bool {
 /// assert!(healthy);
 /// # }
 /// ```
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 pub async fn tcp_probe(addr: &str, timeout: Duration) -> bool {
     match tokio::time::timeout(timeout, TcpStream::connect(addr)).await {
         Ok(Ok(_stream)) => {

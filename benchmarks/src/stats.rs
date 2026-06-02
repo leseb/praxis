@@ -106,6 +106,7 @@ impl DockerStatsCollector {
 // -----------------------------------------------------------------------------
 
 /// Background loop that polls `docker stats` until stopped.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 async fn poll_loop(container: String, stop: Arc<AtomicBool>) -> Vec<StatsSample> {
     let mut samples = Vec::new();
 
@@ -126,6 +127,7 @@ async fn poll_loop(container: String, stop: Arc<AtomicBool>) -> Vec<StatsSample>
 }
 
 /// Execute one `docker stats --no-stream` poll and parse the output.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 async fn poll_once(container: &str) -> Option<StatsSample> {
     let output = tokio::process::Command::new("docker")
         .args([
@@ -237,6 +239,7 @@ fn parse_byte_value(s: &str) -> Option<u64> {
 // -----------------------------------------------------------------------------
 
 /// Compute aggregate [`ResourceMetrics`] from collected samples.
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 #[allow(clippy::cast_precision_loss, reason = "sample counts and byte sums are small enough")]
 fn compute_metrics(samples: &[StatsSample]) -> Option<ResourceMetrics> {
     if samples.is_empty() {

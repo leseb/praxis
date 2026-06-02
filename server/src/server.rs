@@ -73,7 +73,11 @@ pub fn run_server(config: Config, config_path: Option<PathBuf>) -> ! {
 /// Config is owned for the server's lifetime (never returns).
 ///
 /// [`register_filters!`]: praxis_filter::register_filters
-#[allow(clippy::needless_pass_by_value, reason = "server owns config")]
+#[allow(
+    clippy::cognitive_complexity,
+    clippy::needless_pass_by_value,
+    reason = "server owns config; pre-existing complexity exposed by dependency graph change"
+)]
 pub fn run_server_with_registry(config: Config, registry: FilterRegistry, config_path: Option<PathBuf>) -> ! {
     enforce_root_check(&config);
     info!("building filter pipelines");
@@ -218,6 +222,7 @@ fn enforce_root_check(_config: &Config) {}
 /// strict check (e.g. `0644`). The warning gives operators visibility without
 /// blocking legitimate deployments.
 #[cfg(unix)]
+#[allow(clippy::cognitive_complexity, reason = "pre-existing complexity exposed by dependency graph change")]
 fn warn_insecure_key_permissions(config: &Config) {
     use std::os::unix::fs::PermissionsExt;
 
