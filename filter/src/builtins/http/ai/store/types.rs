@@ -25,6 +25,7 @@ pub(crate) const MAX_PAGE_LIMIT: u32 = 100;
 /// messages used for multi-turn conversation rehydration. JSON
 /// columns use [`serde_json::Value`] — the store is intentionally
 /// schema-agnostic about their contents.
+#[derive(Debug)]
 pub struct ResponseRecord {
     /// Unique response ID (e.g., `"resp_abc123"`).
     pub id: String,
@@ -118,6 +119,7 @@ impl ListParams {
 }
 
 /// A page of response records.
+#[derive(Debug)]
 pub struct ResponsePage {
     /// The response records in this page.
     pub data: Vec<ResponseRecord>,

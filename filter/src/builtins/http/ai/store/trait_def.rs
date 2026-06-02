@@ -79,4 +79,14 @@ pub trait ResponseStore: Send + Sync {
         tenant_id: &str,
         conversation_id: &str,
     ) -> Result<Option<ConversationRecord>, StoreError>;
+
+    /// Delete a conversation by ID, scoped to a tenant.
+    ///
+    /// Returns `true` if a record was deleted, `false` if no
+    /// matching record existed for this tenant.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] if the database operation fails.
+    async fn delete_conversation(&self, tenant_id: &str, conversation_id: &str) -> Result<bool, StoreError>;
 }

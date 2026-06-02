@@ -611,6 +611,235 @@ async fn conversation_tenant_isolation() {
     assert!(result.is_none(), "tenant_b should not see tenant_a conversation");
 }
 
+#[tokio::test]
+async fn delete_existing_conversation() {
+    let store = make_store().await;
+    let record = ConversationRecord {
+        conversation_id: "conv_1".to_owned(),
+        tenant_id: "tenant_a".to_owned(),
+        messages: json!([]),
+    };
+    store.upsert_conversation(&record).await.expect("upsert should succeed");
+
+    let deleted = store
+        .delete_conversation("tenant_a", "conv_1")
+        .await
+        .expect("delete should succeed");
+
+    assert!(deleted, "delete should return true for existing conversation");
+
+    let fetched = store
+        .get_conversation("tenant_a", "conv_1")
+        .await
+        .expect("get should succeed");
+
+    assert!(fetched.is_none(), "deleted conversation should not be retrievable");
+}
+
+#[tokio::test]
+async fn delete_missing_conversation_returns_false() {
+    let store = make_store().await;
+
+    let deleted = store
+        .delete_conversation("tenant_a", "nonexistent")
+        .await
+        .expect("delete should succeed");
+
+    assert!(!deleted, "delete should return false for missing conversation");
+}
+
+#[tokio::test]
+async fn delete_conversation_tenant_isolation() {
+    let store = make_store().await;
+    let record = ConversationRecord {
+        conversation_id: "conv_1".to_owned(),
+        tenant_id: "tenant_a".to_owned(),
+        messages: json!([]),
+    };
+    store.upsert_conversation(&record).await.expect("upsert should succeed");
+
+    let deleted = store
+        .delete_conversation("tenant_b", "conv_1")
+        .await
+        .expect("delete should succeed");
+
+    assert!(!deleted, "tenant_b should not be able to delete tenant_a conversation");
+
+    let still_exists = store
+        .get_conversation("tenant_a", "conv_1")
+        .await
+        .expect("get should succeed");
+
+    assert!(
+        still_exists.is_some(),
+        "conversation should still exist after cross-tenant delete attempt"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Pagination Edge Cases
+// -----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_responses_invalid_cursor_returns_error() {
+    let store = make_store().await;
+
+    let err = store
+        .list_responses(
+            "tenant_a",
+            &ListParams {
+                cursor: Some("not_a_valid_cursor".to_owned()),
+                ..ListParams::default()
+            },
+        )
+        .await
+        .expect_err("invalid cursor should fail");
+
+    assert!(
+        matches!(err, StoreError::Database(_)),
+        "error should be Database, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn list_responses_non_numeric_timestamp_cursor_returns_error() {
+    let store = make_store().await;
+
+    let err = store
+        .list_responses(
+            "tenant_a",
+            &ListParams {
+                cursor: Some("abc:resp_1".to_owned()),
+                ..ListParams::default()
+            },
+        )
+        .await
+        .expect_err("non-numeric timestamp cursor should fail");
+
+    assert!(
+        matches!(err, StoreError::Database(_)),
+        "error should be Database, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn list_responses_ascending_with_cursor() {
+    let store = make_store().await;
+    for i in 1..=5 {
+        store
+            .upsert_response(&make_response_record(
+                &format!("resp_{i}"),
+                "tenant_a",
+                i64::from(i) * 1000,
+            ))
+            .await
+            .expect("upsert should succeed");
+    }
+
+    let page1 = store
+        .list_responses(
+            "tenant_a",
+            &ListParams {
+                limit: 2,
+                order: Order::Ascending,
+                ..ListParams::default()
+            },
+        )
+        .await
+        .expect("list should succeed");
+
+    assert_eq!(page1.data.len(), 2, "first page should have 2 records");
+    assert_eq!(page1.data[0].id, "resp_1", "should start with oldest");
+    assert!(page1.has_more, "should have more pages");
+
+    let page2 = store
+        .list_responses(
+            "tenant_a",
+            &ListParams {
+                cursor: page1.next_cursor,
+                limit: 2,
+                order: Order::Ascending,
+            },
+        )
+        .await
+        .expect("list should succeed");
+
+    assert_eq!(page2.data.len(), 2, "second page should have 2 records");
+    assert_eq!(page2.data[0].id, "resp_3", "should continue from cursor");
+}
+
+#[tokio::test]
+async fn list_responses_limit_above_max_is_clamped() {
+    let store = make_store().await;
+    for i in 1..=3 {
+        store
+            .upsert_response(&make_response_record(
+                &format!("resp_{i}"),
+                "tenant_a",
+                i64::from(i) * 1000,
+            ))
+            .await
+            .expect("upsert should succeed");
+    }
+
+    let page = store
+        .list_responses(
+            "tenant_a",
+            &ListParams {
+                limit: 200,
+                ..ListParams::default()
+            },
+        )
+        .await
+        .expect("list should succeed");
+
+    assert_eq!(
+        page.data.len(),
+        3,
+        "should return all records (limit clamped, not rejected)"
+    );
+}
+
+#[test]
+fn effective_limit_clamps_to_range() {
+    use super::types::{DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT};
+
+    let params = ListParams {
+        limit: 0,
+        ..ListParams::default()
+    };
+    assert_eq!(params.effective_limit(), 1, "zero should clamp to 1");
+
+    let params = ListParams {
+        limit: 200,
+        ..ListParams::default()
+    };
+    assert_eq!(params.effective_limit(), MAX_PAGE_LIMIT, "200 should clamp to max");
+
+    let params = ListParams::default();
+    assert_eq!(params.effective_limit(), DEFAULT_PAGE_LIMIT, "default should be 20");
+
+    let params = ListParams {
+        limit: 50,
+        ..ListParams::default()
+    };
+    assert_eq!(params.effective_limit(), 50, "50 should pass through");
+}
+
+#[test]
+fn input_items_from_empty_array() {
+    let record = ResponseRecord {
+        input: json!([]),
+        ..make_response_record("resp_1", "tenant_a", 1000)
+    };
+
+    let page = list_input_items(&record, &ListParams::default()).expect("list should succeed");
+
+    assert!(page.data.is_empty(), "empty array should return no items");
+    assert!(!page.has_more, "should have no more items");
+    assert!(page.next_cursor.is_none(), "should have no cursor");
+}
+
 // -----------------------------------------------------------------------------
 // Registry
 // -----------------------------------------------------------------------------

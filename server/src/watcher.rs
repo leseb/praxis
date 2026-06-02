@@ -128,7 +128,11 @@ async fn run_event_loop(rx: &mut mpsc::Receiver<()>, params: &WatcherParams) {
 }
 
 /// Read the config file, parse it, and attempt a reload.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines, reason = "orchestration function")]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "orchestration function"
+)]
 fn handle_reload(
     config_path: &PathBuf,
     current_config: &mut Config,

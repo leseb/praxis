@@ -75,7 +75,6 @@ impl SqliteResponseStore {
 }
 
 #[async_trait]
-#[allow(clippy::too_many_lines, reason = "trait impl groups related CRUD operations")]
 impl ResponseStore for SqliteResponseStore {
     async fn upsert_response(&self, record: &ResponseRecord) -> Result<(), StoreError> {
         let response_object =
@@ -137,6 +136,7 @@ impl ResponseStore for SqliteResponseStore {
         Ok(result.rows_affected() > 0)
     }
 
+    #[allow(clippy::too_many_lines, reason = "four query variants for cursor/order combinations")]
     async fn list_responses(&self, tenant_id: &str, params: &ListParams) -> Result<ResponsePage, StoreError> {
         let limit = params.effective_limit();
         let fetch_limit = i64::from(limit) + 1;
@@ -294,6 +294,22 @@ impl ResponseStore for SqliteResponseStore {
             })
         })
         .transpose()
+    }
+
+    async fn delete_conversation(&self, tenant_id: &str, conversation_id: &str) -> Result<bool, StoreError> {
+        let sql = format!(
+            "DELETE FROM {} WHERE conversation_id = ? AND tenant_id = ?",
+            self.tables.conversations
+        );
+
+        let result = sqlx::query(&sql)
+            .bind(conversation_id)
+            .bind(tenant_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))?;
+
+        Ok(result.rows_affected() > 0)
     }
 }
 

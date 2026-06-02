@@ -274,7 +274,10 @@ fn validate_mcp_headers(
 }
 
 /// Validate a single MCP header value against its body-derived counterpart.
-#[allow(clippy::too_many_lines, reason = "pre-existing: present/missing/invalid UTF-8 branches")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "pre-existing: present/missing/invalid UTF-8 branches"
+)]
 fn validate_single_header(
     ctx: &mut HttpFilterContext<'_>,
     header_name: &str,

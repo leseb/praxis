@@ -38,7 +38,11 @@ pub async fn http_probe(addr: &str, path: &str, expected_status: u16, timeout: D
 }
 
 /// Inner HTTP probe logic (no timeout wrapper).
-#[allow(clippy::cognitive_complexity, clippy::indexing_slicing, reason = "bounded by read length")]
+#[allow(
+    clippy::cognitive_complexity,
+    clippy::indexing_slicing,
+    reason = "bounded by read length"
+)]
 async fn http_probe_inner(addr: &str, path: &str, expected_status: u16) -> bool {
     let mut stream = match TcpStream::connect(addr).await {
         Ok(s) => s,
