@@ -304,6 +304,31 @@ fn input_items_limit_zero_clamps_to_one() {
 }
 
 #[test]
+fn input_items_rejects_overflowing_cursor() {
+    let record = ResponseRecord {
+        input: json!([{"type": "message", "role": "user", "content": "Hello"}]),
+        ..make_response_record("resp_1", "tenant_a", 1000)
+    };
+
+    let result = list_input_items(
+        &record,
+        &ListParams {
+            cursor: Some(usize::MAX.to_string()),
+            limit: 1,
+        },
+    );
+
+    let Err(err) = result else {
+        panic!("overflowing cursor should be rejected");
+    };
+
+    assert!(
+        err.to_string().contains("overflow"),
+        "error should explain cursor overflow: {err}"
+    );
+}
+
+#[test]
 fn input_items_from_empty_array() {
     let record = ResponseRecord {
         input: json!([]),

@@ -36,11 +36,7 @@ pub(crate) struct TableNames {
 /// Returns [`StoreError::Database`] if table names contain
 /// invalid characters.
 pub(crate) fn generate_ddl(tables: &TableNames) -> Result<Vec<String>, StoreError> {
-    let r = &tables.responses;
-    let c = &tables.conversations;
-
-    validate_identifier(r)?;
-    validate_identifier(c)?;
+    let (r, c) = validate_table_names(tables)?;
 
     Ok(vec![
         format!(
@@ -65,6 +61,21 @@ pub(crate) fn generate_ddl(tables: &TableNames) -> Result<Vec<String>, StoreErro
         ),
         format!("CREATE INDEX IF NOT EXISTS idx_{c}_tenant_id ON {c}(tenant_id)"),
     ])
+}
+
+/// Validate the configured table names and return them as borrowed identifiers.
+fn validate_table_names(tables: &TableNames) -> Result<(&str, &str), StoreError> {
+    let r = tables.responses.as_str();
+    let c = tables.conversations.as_str();
+
+    validate_identifier(r)?;
+    validate_identifier(c)?;
+    if r.eq_ignore_ascii_case(c) {
+        return Err(StoreError::Database(format!(
+            "response and conversation table names must be distinct: {r}"
+        )));
+    }
+    Ok((r, c))
 }
 
 /// Maximum length for a table name identifier.
@@ -176,6 +187,32 @@ mod tests {
         assert!(
             err.to_string().contains("start with"),
             "should reject invalid conversation table name: {err}"
+        );
+    }
+
+    #[test]
+    fn generate_ddl_rejects_duplicate_names() {
+        let tables = TableNames {
+            responses: "same_table".to_owned(),
+            conversations: "same_table".to_owned(),
+        };
+        let err = generate_ddl(&tables).unwrap_err();
+        assert!(
+            err.to_string().contains("distinct"),
+            "should reject duplicate table names: {err}"
+        );
+    }
+
+    #[test]
+    fn generate_ddl_rejects_case_insensitive_duplicate_names() {
+        let tables = TableNames {
+            responses: "Responses".to_owned(),
+            conversations: "responses".to_owned(),
+        };
+        let err = generate_ddl(&tables).unwrap_err();
+        assert!(
+            err.to_string().contains("distinct"),
+            "should reject case-insensitive duplicate table names: {err}"
         );
     }
 }

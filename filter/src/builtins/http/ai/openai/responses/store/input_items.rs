@@ -92,7 +92,10 @@ pub fn list_input_items(record: &ResponseRecord, params: &ListParams) -> Result<
         .unwrap_or(0);
 
     let limit = usize::try_from(params.effective_limit()).map_err(|e| StoreError::Database(e.to_string()))?;
-    let end = (offset + limit).min(items.len());
+    let end = offset
+        .checked_add(limit)
+        .ok_or_else(|| StoreError::Database("input_items cursor offset overflow".to_owned()))?
+        .min(items.len());
     let has_more = end < items.len();
 
     let data: Vec<serde_json::Value> = items.into_iter().skip(offset).take(limit).collect();

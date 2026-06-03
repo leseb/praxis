@@ -4,7 +4,10 @@
 //! [`SqliteResponseStore`] — `SQLite` backend for the response store.
 
 use async_trait::async_trait;
-use sqlx::{Row, SqlitePool, sqlite::SqliteConnectOptions};
+use sqlx::{
+    Row, SqlitePool,
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+};
 use tracing::info;
 
 use super::{
@@ -49,7 +52,8 @@ impl SqliteResponseStore {
             .parse()
             .map_err(|e: sqlx::Error| StoreError::Database(e.to_string()))?;
 
-        let pool = SqlitePool::connect_with(options.create_if_missing(true))
+        let pool = sqlite_pool_options(database_url)
+            .connect_with(options.create_if_missing(true))
             .await
             .map_err(|e| StoreError::Database(e.to_string()))?;
 
@@ -72,6 +76,25 @@ impl SqliteResponseStore {
         );
         Ok(Self { pool, tables })
     }
+}
+
+/// Build pool options for the requested SQLite database URL.
+fn sqlite_pool_options(database_url: &str) -> SqlitePoolOptions {
+    if is_memory_database_url(database_url) {
+        SqlitePoolOptions::new()
+            .max_connections(1)
+            .min_connections(1)
+            .idle_timeout(None)
+            .max_lifetime(None)
+    } else {
+        SqlitePoolOptions::new()
+    }
+}
+
+/// Return whether the database URL targets an in-memory SQLite database.
+fn is_memory_database_url(database_url: &str) -> bool {
+    let url = database_url.trim();
+    url == "sqlite::memory:" || url == "sqlite://:memory:" || url.contains("mode=memory")
 }
 
 #[async_trait]
