@@ -3,7 +3,49 @@
 
 //! Input item pagination for the `OpenAI` Responses API.
 
-use crate::builtins::http::ai::store::{ListParams, ResponseRecord, StoreError};
+use crate::builtins::http::ai::store::{ResponseRecord, StoreError};
+
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
+/// Default page size for input item list operations (matches `OpenAI` default).
+const DEFAULT_PAGE_LIMIT: u32 = 20;
+
+/// Maximum page size for input item list operations (matches `OpenAI` maximum).
+const MAX_PAGE_LIMIT: u32 = 100;
+
+// -----------------------------------------------------------------------------
+// ListParams
+// -----------------------------------------------------------------------------
+
+/// Cursor-based pagination parameters for input item listing.
+#[derive(Debug, Clone)]
+pub struct ListParams {
+    /// Opaque cursor for the next page. `None` starts from the
+    /// beginning.
+    pub cursor: Option<String>,
+
+    /// Maximum number of items to return (clamped to
+    /// `1..=[MAX_PAGE_LIMIT]`).
+    pub limit: u32,
+}
+
+impl Default for ListParams {
+    fn default() -> Self {
+        Self {
+            cursor: None,
+            limit: DEFAULT_PAGE_LIMIT,
+        }
+    }
+}
+
+impl ListParams {
+    /// Return the effective limit, clamped to `1..=[MAX_PAGE_LIMIT]`.
+    fn effective_limit(&self) -> u32 {
+        self.limit.clamp(1, MAX_PAGE_LIMIT)
+    }
+}
 
 // -----------------------------------------------------------------------------
 // InputItemPage

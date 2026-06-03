@@ -55,7 +55,6 @@ pub(crate) fn generate_ddl(tables: &TableNames) -> Result<Vec<String>, StoreErro
                 PRIMARY KEY (tenant_id, id)
             )"
         ),
-        format!("CREATE INDEX IF NOT EXISTS idx_{r}_tenant_created ON {r}(tenant_id, created_at)"),
         format!(
             "CREATE TABLE IF NOT EXISTS {c} (
                 conversation_id TEXT NOT NULL,
@@ -160,7 +159,7 @@ mod tests {
             conversations: "test_conversations".to_owned(),
         };
         let ddl = generate_ddl(&tables).expect("valid names should produce DDL");
-        assert_eq!(ddl.len(), 4, "should produce 4 DDL statements");
+        assert_eq!(ddl.len(), 3, "should produce 3 DDL statements");
         assert!(
             ddl[0].contains("test_responses"),
             "first statement should reference responses table"

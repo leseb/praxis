@@ -6,16 +6,6 @@
 use std::fmt;
 
 // -----------------------------------------------------------------------------
-// Constants
-// -----------------------------------------------------------------------------
-
-/// Default page size for list operations (matches `OpenAI` default).
-pub(crate) const DEFAULT_PAGE_LIMIT: u32 = 20;
-
-/// Maximum page size for list operations (matches `OpenAI` maximum).
-pub(crate) const MAX_PAGE_LIMIT: u32 = 100;
-
-// -----------------------------------------------------------------------------
 // ResponseRecord
 // -----------------------------------------------------------------------------
 
@@ -69,66 +59,6 @@ pub struct ConversationRecord {
 
     /// Accumulated conversation messages as JSON.
     pub messages: serde_json::Value,
-}
-
-// -----------------------------------------------------------------------------
-// Pagination
-// -----------------------------------------------------------------------------
-
-/// Sort order for list operations.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum Order {
-    /// Oldest first.
-    Ascending,
-
-    /// Newest first.
-    #[default]
-    Descending,
-}
-
-/// Cursor-based pagination parameters.
-#[derive(Debug, Clone)]
-pub struct ListParams {
-    /// Opaque cursor for the next page. `None` starts from the
-    /// beginning.
-    pub cursor: Option<String>,
-
-    /// Maximum number of items to return (clamped to
-    /// `1..=[MAX_PAGE_LIMIT]`).
-    pub limit: u32,
-
-    /// Sort order.
-    pub order: Order,
-}
-
-impl Default for ListParams {
-    fn default() -> Self {
-        Self {
-            cursor: None,
-            limit: DEFAULT_PAGE_LIMIT,
-            order: Order::default(),
-        }
-    }
-}
-
-impl ListParams {
-    /// Return the effective limit, clamped to `1..=[MAX_PAGE_LIMIT]`.
-    pub(crate) fn effective_limit(&self) -> u32 {
-        self.limit.clamp(1, MAX_PAGE_LIMIT)
-    }
-}
-
-/// A page of response records.
-#[derive(Debug)]
-pub struct ResponsePage {
-    /// The response records in this page.
-    pub data: Vec<ResponseRecord>,
-
-    /// Cursor for the next page (`None` when no more pages).
-    pub next_cursor: Option<String>,
-
-    /// Whether more pages exist beyond this one.
-    pub has_more: bool,
 }
 
 // -----------------------------------------------------------------------------

@@ -10,7 +10,7 @@ use tracing::info;
 use super::{
     schemas::{TableNames, generate_ddl},
     trait_def::ResponseStore,
-    types::{ConversationRecord, ListParams, Order, ResponsePage, ResponseRecord, StoreError},
+    types::{ConversationRecord, ResponseRecord, StoreError},
 };
 
 // -----------------------------------------------------------------------------
@@ -136,109 +136,6 @@ impl ResponseStore for SqliteResponseStore {
         Ok(result.rows_affected() > 0)
     }
 
-    #[allow(clippy::too_many_lines, reason = "four query variants for cursor/order combinations")]
-    async fn list_responses(&self, tenant_id: &str, params: &ListParams) -> Result<ResponsePage, StoreError> {
-        let limit = params.effective_limit();
-        let fetch_limit = i64::from(limit) + 1;
-        let t = &self.tables.responses;
-
-        let rows = match (&params.cursor, params.order) {
-            (None, Order::Descending) => {
-                let sql = format!(
-                    "SELECT id, tenant_id, created_at, model, \
-                            response_object, input, messages \
-                     FROM {t} \
-                     WHERE tenant_id = ? \
-                     ORDER BY created_at DESC, id DESC \
-                     LIMIT ?"
-                );
-                sqlx::query(&sql)
-                    .bind(tenant_id)
-                    .bind(fetch_limit)
-                    .fetch_all(&self.pool)
-                    .await
-            },
-            (None, Order::Ascending) => {
-                let sql = format!(
-                    "SELECT id, tenant_id, created_at, model, \
-                            response_object, input, messages \
-                     FROM {t} \
-                     WHERE tenant_id = ? \
-                     ORDER BY created_at ASC, id ASC \
-                     LIMIT ?"
-                );
-                sqlx::query(&sql)
-                    .bind(tenant_id)
-                    .bind(fetch_limit)
-                    .fetch_all(&self.pool)
-                    .await
-            },
-            (Some(cursor), Order::Descending) => {
-                let (cursor_ts, cursor_id) = parse_cursor(cursor)?;
-                let sql = format!(
-                    "SELECT id, tenant_id, created_at, model, \
-                            response_object, input, messages \
-                     FROM {t} \
-                     WHERE tenant_id = ? \
-                       AND (created_at < ? OR (created_at = ? AND id < ?)) \
-                     ORDER BY created_at DESC, id DESC \
-                     LIMIT ?"
-                );
-                sqlx::query(&sql)
-                    .bind(tenant_id)
-                    .bind(cursor_ts)
-                    .bind(cursor_ts)
-                    .bind(cursor_id)
-                    .bind(fetch_limit)
-                    .fetch_all(&self.pool)
-                    .await
-            },
-            (Some(cursor), Order::Ascending) => {
-                let (cursor_ts, cursor_id) = parse_cursor(cursor)?;
-                let sql = format!(
-                    "SELECT id, tenant_id, created_at, model, \
-                            response_object, input, messages \
-                     FROM {t} \
-                     WHERE tenant_id = ? \
-                       AND (created_at > ? OR (created_at = ? AND id > ?)) \
-                     ORDER BY created_at ASC, id ASC \
-                     LIMIT ?"
-                );
-                sqlx::query(&sql)
-                    .bind(tenant_id)
-                    .bind(cursor_ts)
-                    .bind(cursor_ts)
-                    .bind(cursor_id)
-                    .bind(fetch_limit)
-                    .fetch_all(&self.pool)
-                    .await
-            },
-        }
-        .map_err(|e| StoreError::Database(e.to_string()))?;
-
-        let limit_usize = usize::try_from(limit).map_err(|e| StoreError::Database(e.to_string()))?;
-
-        let has_more = rows.len() > limit_usize;
-
-        let data: Vec<ResponseRecord> = rows
-            .iter()
-            .take(limit_usize)
-            .map(row_to_response_record)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let next_cursor = if has_more {
-            data.last().map(|r| encode_cursor(r.created_at, &r.id))
-        } else {
-            None
-        };
-
-        Ok(ResponsePage {
-            data,
-            next_cursor,
-            has_more,
-        })
-    }
-
     async fn upsert_conversation(&self, record: &ConversationRecord) -> Result<(), StoreError> {
         let messages = serde_json::to_string(&record.messages).map_err(|e| StoreError::Serialization(e.to_string()))?;
 
@@ -314,24 +211,8 @@ impl ResponseStore for SqliteResponseStore {
 }
 
 // -----------------------------------------------------------------------------
-// Cursor Helpers
+// Row Conversion
 // -----------------------------------------------------------------------------
-
-/// Encode a `(created_at, id)` pair as a cursor string.
-fn encode_cursor(created_at: i64, id: &str) -> String {
-    format!("{created_at}:{id}")
-}
-
-/// Decode a cursor string into a `(created_at, id)` pair.
-fn parse_cursor(cursor: &str) -> Result<(i64, &str), StoreError> {
-    let (ts_str, id) = cursor
-        .split_once(':')
-        .ok_or_else(|| StoreError::Database(format!("invalid cursor format: {cursor}")))?;
-    let ts: i64 = ts_str
-        .parse()
-        .map_err(|e| StoreError::Database(format!("invalid cursor timestamp: {e}")))?;
-    Ok((ts, id))
-}
 
 /// Convert a sqlx row to a [`ResponseRecord`].
 fn row_to_response_record(row: &sqlx::sqlite::SqliteRow) -> Result<ResponseRecord, StoreError> {

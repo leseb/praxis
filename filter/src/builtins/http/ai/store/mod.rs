@@ -39,7 +39,7 @@ use std::sync::Arc;
 use dashmap::{DashMap, mapref::entry::Entry};
 
 #[allow(unused_imports, reason = "re-exports for upcoming response store filter and tests")]
-pub use self::types::{ConversationRecord, ListParams, Order, ResponsePage, ResponseRecord, StoreError};
+pub use self::types::{ConversationRecord, ResponseRecord, StoreError};
 pub use self::{sqlite::SqliteResponseStore, trait_def::ResponseStore};
 
 // -----------------------------------------------------------------------------

@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 
-use super::types::{ConversationRecord, ListParams, ResponsePage, ResponseRecord, StoreError};
+use super::types::{ConversationRecord, ResponseRecord, StoreError};
 
 // -----------------------------------------------------------------------------
 // ResponseStore Trait
@@ -51,13 +51,6 @@ pub trait ResponseStore: Send + Sync {
     ///
     /// Returns [`StoreError`] if the database operation fails.
     async fn delete_response(&self, tenant_id: &str, id: &str) -> Result<bool, StoreError>;
-
-    /// List responses for a tenant with cursor-based pagination.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`StoreError`] if the database operation fails.
-    async fn list_responses(&self, tenant_id: &str, params: &ListParams) -> Result<ResponsePage, StoreError>;
 
     /// Insert or update a conversation message cache.
     ///

@@ -12,4 +12,4 @@
 mod input_items;
 
 #[allow(unused_imports, reason = "re-exports for upcoming Responses API CRUD endpoints")]
-pub use input_items::{InputItemPage, list_input_items};
+pub use input_items::{InputItemPage, ListParams, list_input_items};
