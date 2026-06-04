@@ -21,7 +21,6 @@ pub use http::{
 };
 #[cfg(feature = "ai-inference")]
 pub use http::{
-    ConversationRecord, ListParams, Order, ResponsePage, ResponseRecord, ResponseStore, ResponseStoreRegistry,
-    SqliteResponseStore, StoreError,
+    ConversationRecord, ResponseRecord, ResponseStore, ResponseStoreRegistry, SqliteResponseStore, StoreError,
 };
 pub use tcp::{SniRouterFilter, TcpAccessLogFilter, TcpLoadBalancerFilter};

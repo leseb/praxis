@@ -11,7 +11,7 @@ use super::{
     ConversationRecord, ResponseRecord, ResponseStoreRegistry, SqliteResponseStore, trait_def::ResponseStore,
     types::StoreError,
 };
-use crate::builtins::http::ai::openai::responses::store::{ListParams, list_input_items};
+use crate::builtins::http::ai::openai::responses::store::{ListParams, Order, list_input_items};
 
 // -----------------------------------------------------------------------------
 // Schema Initialization
@@ -245,6 +245,7 @@ fn input_items_from_array_input() {
         &ListParams {
             cursor: page.next_cursor,
             limit: 2,
+            ..ListParams::default()
         },
     )
     .expect("list should succeed");
@@ -264,6 +265,35 @@ fn input_items_from_string_input() {
 
     assert_eq!(page.data.len(), 1, "string input should yield 1 item");
     assert_eq!(page.data[0], json!("Hello, world!"), "item should be the string");
+}
+
+#[test]
+fn input_items_honors_sort_order() {
+    let record = ResponseRecord {
+        input: json!(["first", "second", "third"]),
+        ..make_response_record("resp_1", "tenant_a", 1000)
+    };
+
+    let ascending = list_input_items(
+        &record,
+        &ListParams {
+            order: Order::Ascending,
+            ..ListParams::default()
+        },
+    )
+    .expect("ascending list should succeed");
+    let descending = list_input_items(&record, &ListParams::default()).expect("descending list should succeed");
+
+    assert_eq!(
+        ascending.data,
+        vec![json!("first"), json!("second"), json!("third")],
+        "ascending order should preserve input order"
+    );
+    assert_eq!(
+        descending.data,
+        vec![json!("third"), json!("second"), json!("first")],
+        "descending order should reverse input order"
+    );
 }
 
 #[test]
@@ -294,6 +324,7 @@ fn input_items_limit_zero_clamps_to_one() {
         &ListParams {
             cursor: page1.next_cursor,
             limit: 0,
+            ..ListParams::default()
         },
     )
     .expect("list should succeed");
@@ -315,6 +346,7 @@ fn input_items_rejects_overflowing_cursor() {
         &ListParams {
             cursor: Some(usize::MAX.to_string()),
             limit: 1,
+            ..ListParams::default()
         },
     );
 

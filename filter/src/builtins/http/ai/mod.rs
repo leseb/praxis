@@ -24,6 +24,5 @@ pub use openai::ResponsesFormatFilter;
 pub use prompt_enrich::PromptEnrichFilter;
 #[cfg(feature = "ai-inference")]
 pub use store::{
-    ConversationRecord, ListParams, Order, ResponsePage, ResponseRecord, ResponseStore, ResponseStoreRegistry,
-    SqliteResponseStore, StoreError,
+    ConversationRecord, ResponseRecord, ResponseStore, ResponseStoreRegistry, SqliteResponseStore, StoreError,
 };

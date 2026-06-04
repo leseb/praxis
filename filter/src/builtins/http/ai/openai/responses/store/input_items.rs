@@ -16,6 +16,21 @@ const DEFAULT_PAGE_LIMIT: u32 = 20;
 const MAX_PAGE_LIMIT: u32 = 100;
 
 // -----------------------------------------------------------------------------
+// Order
+// -----------------------------------------------------------------------------
+
+/// Sort order for input item listing.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Order {
+    /// Oldest first (natural input order).
+    Ascending,
+
+    /// Newest first (reversed input order).
+    #[default]
+    Descending,
+}
+
+// -----------------------------------------------------------------------------
 // ListParams
 // -----------------------------------------------------------------------------
 
@@ -29,6 +44,9 @@ pub struct ListParams {
     /// Maximum number of items to return (clamped to
     /// `1..=[MAX_PAGE_LIMIT]`).
     pub limit: u32,
+
+    /// Sort order.
+    pub order: Order,
 }
 
 impl Default for ListParams {
@@ -36,6 +54,7 @@ impl Default for ListParams {
         Self {
             cursor: None,
             limit: DEFAULT_PAGE_LIMIT,
+            order: Order::default(),
         }
     }
 }
@@ -76,12 +95,16 @@ pub struct InputItemPage {
 ///
 /// # Errors
 ///
-/// Returns [`StoreError::Database`] if the cursor is malformed.
+/// Returns [`StoreError::Database`] if the cursor is malformed
+/// or overflows while calculating the page window.
 pub fn list_input_items(record: &ResponseRecord, params: &ListParams) -> Result<InputItemPage, StoreError> {
-    let items = match &record.input {
+    let mut items = match &record.input {
         serde_json::Value::Array(arr) => arr.clone(),
         other => vec![other.clone()],
     };
+    if params.order == Order::Descending {
+        items.reverse();
+    }
 
     let offset = params
         .cursor
