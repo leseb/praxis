@@ -19,4 +19,9 @@ pub use http::{
     RateLimitFilter, RateLimitMode, RedirectFilter, RedirectStatus, RequestIdFilter, RouterFilter, RuleTargetKind,
     StaticResponseFilter, TimeoutFilter, UrlRewriteFilter, has_dot_dot_traversal, normalize_rewritten_path,
 };
+#[cfg(feature = "ai-inference")]
+pub use http::{
+    ConversationRecord, ListParams, Order, ResponsePage, ResponseRecord, ResponseStore, ResponseStoreRegistry,
+    SqliteResponseStore, StoreError,
+};
 pub use tcp::{SniRouterFilter, TcpAccessLogFilter, TcpLoadBalancerFilter};

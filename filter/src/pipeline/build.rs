@@ -53,6 +53,8 @@ impl FilterPipeline {
             filters,
             health_registry: None,
             kv_stores: None,
+            #[cfg(feature = "ai-inference")]
+            response_stores: None,
         })
     }
 
@@ -82,6 +84,8 @@ impl FilterPipeline {
             filters,
             health_registry: None,
             kv_stores: None,
+            #[cfg(feature = "ai-inference")]
+            response_stores: None,
         })
     }
 

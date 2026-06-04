@@ -8,6 +8,8 @@ use std::{borrow::Cow, collections::HashMap, net::IpAddr, sync::Arc, time::Insta
 use http::{HeaderMap, Method, StatusCode, Uri};
 use praxis_core::{connectivity::Upstream, health::HealthRegistry, kv::KvStoreRegistry};
 
+#[cfg(feature = "ai-inference")]
+use crate::builtins::http::ai::store::ResponseStoreRegistry;
 use crate::{body::BodyMode, pipeline::body::merge_body_mode, results::FilterResultSet};
 
 // -----------------------------------------------------------------------------
@@ -81,6 +83,10 @@ pub struct HttpFilterContext<'a> {
 
     /// Named key-value stores for runtime mappings.
     pub kv_stores: Option<&'a KvStoreRegistry>,
+
+    /// Named response stores for AI inference persistence.
+    #[cfg(feature = "ai-inference")]
+    pub response_stores: Option<&'a ResponseStoreRegistry>,
 
     /// Transport-agnostic request headers, URI, and method.
     pub request: &'a Request,

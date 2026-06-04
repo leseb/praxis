@@ -39,6 +39,8 @@ use praxis_core::{
 use tracing::warn;
 
 use self::filter::PipelineFilter;
+#[cfg(feature = "ai-inference")]
+use crate::builtins::http::ai::store::ResponseStoreRegistry;
 use crate::{
     FilterError,
     body::{BodyCapabilities, BodyMode},
@@ -73,6 +75,10 @@ pub struct FilterPipeline {
 
     /// Named key-value stores for runtime mappings.
     kv_stores: Option<KvStoreRegistry>,
+
+    /// Named response stores for AI inference persistence.
+    #[cfg(feature = "ai-inference")]
+    response_stores: Option<ResponseStoreRegistry>,
 }
 
 impl FilterPipeline {
@@ -164,6 +170,18 @@ impl FilterPipeline {
     /// Set the shared [`KvStoreRegistry`] for this pipeline.
     pub fn set_kv_stores(&mut self, stores: KvStoreRegistry) {
         self.kv_stores = Some(stores);
+    }
+
+    /// The shared response store registry, if set.
+    #[cfg(feature = "ai-inference")]
+    pub fn response_stores(&self) -> Option<&ResponseStoreRegistry> {
+        self.response_stores.as_ref()
+    }
+
+    /// Set the shared [`ResponseStoreRegistry`] for this pipeline.
+    #[cfg(feature = "ai-inference")]
+    pub fn set_response_stores(&mut self, stores: ResponseStoreRegistry) {
+        self.response_stores = Some(stores);
     }
 
     /// Apply [`InsecureOptions`] to all filters in the pipeline.

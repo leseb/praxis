@@ -18,6 +18,11 @@ pub use ai::PromptEnrichFilter;
 #[cfg(feature = "ai-inference")]
 pub use ai::ResponsesFormatFilter;
 pub use ai::{A2aFilter, JsonRpcFilter, McpFilter};
+#[cfg(feature = "ai-inference")]
+pub use ai::{
+    ConversationRecord, ListParams, Order, ResponsePage, ResponseRecord, ResponseStore, ResponseStoreRegistry,
+    SqliteResponseStore, StoreError,
+};
 pub use observability::{AccessLogFilter, RequestIdFilter};
 pub use payload_processing::{CompressionFilter, JsonBodyFieldFilter};
 pub use security::{
