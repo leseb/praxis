@@ -2,7 +2,8 @@
 // Copyright (c) 2026 Praxis Contributors
 
 //! [`ResponseStoreFilter`] persists non-streaming Responses API
-//! responses to the configured store backend.
+//! responses to the configured store backend and handles
+//! `DELETE /v1/responses/{id}` locally.
 //!
 //! # Lifecycle design
 //!
@@ -45,7 +46,7 @@ use tracing::{debug, trace, warn};
 
 use super::config::{ResponseStoreConfig, StorageBackend, validate_config};
 use crate::{
-    FilterAction, FilterError,
+    FilterAction, FilterError, Rejection,
     body::{BodyAccess, BodyMode, limits::MAX_JSON_BODY_BYTES},
     builtins::http::ai::store::{ResponseRecord, ResponseStore, SqliteResponseStore},
     factory::parse_filter_config,
@@ -143,6 +144,40 @@ impl ResponseStoreFilter {
         }
     }
 
+    /// Handle `DELETE /v1/responses/{id}` by deleting from the store.
+    async fn handle_delete(&self, tenant_id: &str, id: &str) -> Result<FilterAction, FilterError> {
+        let store = self.store.get_or_init(|| async { self.init_store().await }).await;
+
+        let Some(store) = store else {
+            return Ok(FilterAction::Continue);
+        };
+
+        let deleted = store
+            .delete_response(tenant_id, id)
+            .await
+            .map_err(|e| FilterError::from(format!("openai_response_store: delete failed: {e}")))?;
+
+        if deleted {
+            debug!(id, tenant_id, "response deleted");
+            Ok(FilterAction::Reject(
+                Rejection::status(200)
+                    .with_header("content-type", "application/json")
+                    .with_body(Bytes::from(format!(
+                        r#"{{"id":"{id}","object":"response.deleted","deleted":true}}"#
+                    ))),
+            ))
+        } else {
+            debug!(id, tenant_id, "response not found for delete");
+            Ok(FilterAction::Reject(
+                Rejection::status(404)
+                    .with_header("content-type", "application/json")
+                    .with_body(Bytes::from(format!(
+                        r#"{{"error":{{"message":"No response found with id: '{id}'.","type":"invalid_request_error"}}}}"#
+                    ))),
+            ))
+        }
+    }
+
     /// Return whether this exchange should release response body
     /// chunks immediately instead of waiting for EOS.
     fn should_release_skipped_response_body(&self, ctx: &HttpFilterContext<'_>) -> bool {
@@ -186,6 +221,23 @@ impl ResponseCapture {
             input: json.get("input").cloned().unwrap_or(Value::Null),
             messages: json.get("output").cloned().unwrap_or(Value::Null),
         }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Path Extraction
+// -----------------------------------------------------------------------------
+
+/// Extract the response ID from a `/v1/responses/{id}` path.
+///
+/// Returns `None` if the path does not match the expected pattern.
+pub(super) fn extract_response_id(path: &str) -> Option<&str> {
+    let path = path.strip_suffix('/').filter(|p| !p.is_empty()).unwrap_or(path);
+    let segments: Vec<&str> = path.split('/').collect();
+
+    match segments.as_slice() {
+        ["", "v1", "responses", id] if !id.is_empty() => Some(id),
+        _ => None,
     }
 }
 
@@ -362,6 +414,14 @@ impl HttpFilter for ResponseStoreFilter {
     }
 
     async fn on_request(&self, ctx: &mut HttpFilterContext<'_>) -> Result<FilterAction, FilterError> {
+        if ctx.request.method == http::Method::DELETE {
+            if let Some(id) = extract_response_id(ctx.request.uri.path()) {
+                let tenant_id = ctx.get_metadata(TENANT_METADATA_KEY).unwrap_or(DEFAULT_TENANT_ID);
+                return self.handle_delete(tenant_id, id).await;
+            }
+            return Ok(FilterAction::Continue);
+        }
+
         if should_skip(ctx) {
             return Ok(FilterAction::Continue);
         }

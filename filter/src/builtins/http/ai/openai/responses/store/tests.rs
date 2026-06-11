@@ -319,20 +319,26 @@ async fn on_request_skips_for_get_method() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn on_request_skips_for_delete_method() {
+async fn on_request_handles_delete_with_matching_path() {
     let filter = make_filter();
     let req = crate::test_utils::make_request(http::Method::DELETE, "/v1/responses/resp_123");
     let mut ctx = crate::test_utils::make_filter_context(&req);
-    ctx.set_metadata("openai_responses_format.format", "openai_responses");
+
+    let action = filter.on_request(&mut ctx).await.unwrap();
+    let rejection = assert_reject(action);
+    assert_eq!(rejection.status, 404, "nonexistent response should return 404");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn on_request_skips_delete_on_unrelated_path() {
+    let filter = make_filter();
+    let req = crate::test_utils::make_request(http::Method::DELETE, "/v1/chat/completions");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
 
     let action = filter.on_request(&mut ctx).await.unwrap();
     assert!(
         matches!(action, FilterAction::Continue),
-        "should skip for DELETE method"
-    );
-    assert!(
-        filter.store.get().is_none(),
-        "store should not be initialized for non-POST requests"
+        "DELETE on unrelated path should continue"
     );
 }
 
@@ -883,8 +889,195 @@ conversations_table: conversations
 }
 
 // -----------------------------------------------------------------------------
+// DELETE
+// -----------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delete_existing_response_returns_200() {
+    let filter = make_filter();
+    init_store_and_insert(&filter, "resp_del1", "default").await;
+
+    let req = crate::test_utils::make_request(http::Method::DELETE, "/v1/responses/resp_del1");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+
+    let action = filter.on_request(&mut ctx).await.unwrap();
+    let rejection = assert_reject(action);
+    assert_eq!(rejection.status, 200, "existing response should return 200");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delete_nonexistent_response_returns_404() {
+    let filter = make_filter();
+    init_store_and_insert(&filter, "resp_exists", "default").await;
+
+    let req = crate::test_utils::make_request(http::Method::DELETE, "/v1/responses/resp_missing");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+
+    let action = filter.on_request(&mut ctx).await.unwrap();
+    let rejection = assert_reject(action);
+    assert_eq!(rejection.status, 404, "nonexistent response should return 404");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delete_is_idempotent() {
+    let filter = make_filter();
+    init_store_and_insert(&filter, "resp_idem", "default").await;
+
+    let req = crate::test_utils::make_request(http::Method::DELETE, "/v1/responses/resp_idem");
+    let mut ctx1 = crate::test_utils::make_filter_context(&req);
+    let action1 = filter.on_request(&mut ctx1).await.unwrap();
+    let r1 = assert_reject(action1);
+    assert_eq!(r1.status, 200, "first delete should return 200");
+
+    let mut ctx2 = crate::test_utils::make_filter_context(&req);
+    let action2 = filter.on_request(&mut ctx2).await.unwrap();
+    let r2 = assert_reject(action2);
+    assert_eq!(r2.status, 404, "second delete should return 404");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delete_cross_tenant_returns_404() {
+    let filter = make_filter();
+    init_store_and_insert(&filter, "resp_tenant", "tenant_a").await;
+
+    let req = crate::test_utils::make_request(http::Method::DELETE, "/v1/responses/resp_tenant");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+
+    let action = filter.on_request(&mut ctx).await.unwrap();
+    let rejection = assert_reject(action);
+    assert_eq!(rejection.status, 404, "delete from wrong tenant should return 404");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delete_uses_tenant_metadata() {
+    let filter = make_filter();
+    init_store_and_insert(&filter, "resp_tmeta", "tenant_x").await;
+
+    let req = crate::test_utils::make_request(http::Method::DELETE, "/v1/responses/resp_tmeta");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    ctx.set_metadata("responses.tenant_id", "tenant_x");
+
+    let action = filter.on_request(&mut ctx).await.unwrap();
+    let rejection = assert_reject(action);
+    assert_eq!(
+        rejection.status, 200,
+        "delete with matching tenant metadata should return 200"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delete_response_has_json_content_type() {
+    let filter = make_filter();
+    init_store_and_insert(&filter, "resp_ct", "default").await;
+
+    let req = crate::test_utils::make_request(http::Method::DELETE, "/v1/responses/resp_ct");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+
+    let action = filter.on_request(&mut ctx).await.unwrap();
+    let rejection = assert_reject(action);
+    let ct = rejection
+        .headers
+        .iter()
+        .find(|(k, _)| k == "content-type")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(ct, Some("application/json"), "response should have JSON content type");
+}
+
+// -----------------------------------------------------------------------------
+// extract_response_id
+// -----------------------------------------------------------------------------
+
+#[test]
+fn extract_response_id_valid() {
+    assert_eq!(
+        super::filter::extract_response_id("/v1/responses/resp_abc"),
+        Some("resp_abc"),
+        "should extract ID from valid path"
+    );
+}
+
+#[test]
+fn extract_response_id_trailing_slash() {
+    assert_eq!(
+        super::filter::extract_response_id("/v1/responses/resp_abc/"),
+        Some("resp_abc"),
+        "should extract ID with trailing slash"
+    );
+}
+
+#[test]
+fn extract_response_id_no_id() {
+    assert_eq!(
+        super::filter::extract_response_id("/v1/responses"),
+        None,
+        "should return None without ID segment"
+    );
+}
+
+#[test]
+fn extract_response_id_sub_resource() {
+    assert_eq!(
+        super::filter::extract_response_id("/v1/responses/resp_abc/input_items"),
+        None,
+        "should return None for sub-resource path"
+    );
+}
+
+#[test]
+fn extract_response_id_unrelated_path() {
+    assert_eq!(
+        super::filter::extract_response_id("/v1/chat/completions"),
+        None,
+        "should return None for unrelated path"
+    );
+}
+
+#[test]
+fn extract_response_id_empty_id_segment() {
+    assert_eq!(
+        super::filter::extract_response_id("/v1/responses/"),
+        None,
+        "should return None for empty ID segment"
+    );
+}
+
+// -----------------------------------------------------------------------------
 // Test Utilities
 // -----------------------------------------------------------------------------
+
+fn assert_reject(action: FilterAction) -> crate::Rejection {
+    match action {
+        FilterAction::Reject(r) => r,
+        other => panic!("expected FilterAction::Reject, got {other:?}"),
+    }
+}
+
+async fn init_store_and_insert(filter: &ResponseStoreFilter, id: &str, tenant_id: &str) {
+    use crate::builtins::http::ai::store::ResponseRecord;
+
+    let store = filter
+        .store
+        .get_or_init(|| async {
+            let store = SqliteResponseStore::new("sqlite::memory:", "test_responses", "test_conversations")
+                .await
+                .ok()?;
+            let arc: std::sync::Arc<dyn ResponseStore> = std::sync::Arc::new(store);
+            Some(arc)
+        })
+        .await;
+    let store = store.as_ref().expect("store should initialize for in-memory SQLite");
+
+    let record = ResponseRecord {
+        id: id.to_owned(),
+        tenant_id: tenant_id.to_owned(),
+        created_at: 1_719_900_000,
+        model: "gpt-4.1".to_owned(),
+        response_object: serde_json::json!({"id": id, "created_at": 1_719_900_000, "model": "gpt-4.1"}),
+        input: serde_json::Value::Array(vec![]),
+        messages: serde_json::Value::Array(vec![]),
+    };
+    store.upsert_response(&record).await.expect("insert should succeed");
+}
 
 fn make_filter() -> ResponseStoreFilter {
     let yaml: serde_yaml::Value = serde_yaml::from_str(
