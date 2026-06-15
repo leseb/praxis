@@ -190,6 +190,28 @@ impl ResponseCapture {
 }
 
 // -----------------------------------------------------------------------------
+// Registry Helpers
+// -----------------------------------------------------------------------------
+
+/// Default store name in the registry.
+const DEFAULT_STORE_NAME: &str = "default";
+
+/// Publish the initialized store into the per-request registry so
+/// downstream filters (rehydrate, compact, etc.) can read from it.
+fn register_store_in_context(ctx: &HttpFilterContext<'_>, store: &Arc<dyn ResponseStore>) {
+    let Some(registry) = ctx.response_stores else {
+        return;
+    };
+    if registry.get(DEFAULT_STORE_NAME).is_some() {
+        return;
+    }
+    let name: Arc<str> = Arc::from(DEFAULT_STORE_NAME);
+    if let Err(e) = registry.register(&name, Arc::clone(store)) {
+        debug!(error = %e, "response store already registered");
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Bypass Helpers
 // -----------------------------------------------------------------------------
 
@@ -367,8 +389,9 @@ impl HttpFilter for ResponseStoreFilter {
         }
 
         let store_opt = self.store.get_or_init(|| async { self.init_store().await }).await;
-        if store_opt.is_none() {
-            ctx.set_metadata("responses.skip_persist", "true");
+        match store_opt {
+            Some(store) => register_store_in_context(ctx, store),
+            None => ctx.set_metadata("responses.skip_persist", "true"),
         }
 
         Ok(FilterAction::Continue)

@@ -356,6 +356,44 @@ async fn on_request_initializes_store_for_openai_responses_format() {
 }
 
 // -----------------------------------------------------------------------------
+// on_request Registry
+// -----------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn on_request_registers_store_in_response_stores() {
+    let filter = make_filter();
+    let req = crate::test_utils::make_request(http::Method::POST, "/v1/responses");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    let registry = crate::builtins::http::ai::store::ResponseStoreRegistry::new();
+    ctx.response_stores = Some(&registry);
+    ctx.set_metadata("openai_responses_format.format", "openai_responses");
+
+    let action = filter.on_request(&mut ctx).await.unwrap();
+    assert!(
+        matches!(action, FilterAction::Continue),
+        "should continue after registering store"
+    );
+    assert!(
+        registry.get("default").is_some(),
+        "store should be registered as 'default' in response_stores"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn on_request_skips_registration_when_no_registry() {
+    let filter = make_filter();
+    let req = crate::test_utils::make_request(http::Method::POST, "/v1/responses");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    ctx.set_metadata("openai_responses_format.format", "openai_responses");
+
+    let action = filter.on_request(&mut ctx).await.unwrap();
+    assert!(
+        matches!(action, FilterAction::Continue),
+        "should continue even without registry"
+    );
+}
+
+// -----------------------------------------------------------------------------
 // on_response
 // -----------------------------------------------------------------------------
 
