@@ -2,8 +2,8 @@
 // Copyright (c) 2026 Praxis Contributors
 
 //! Rehydrate filter: loads conversation context from
-//! `previous_response_id` by fetching stored responses and
-//! prepending their message history to the current request.
+//! `previous_response_id` or `conversation.id` by fetching
+//! stored history and prepending it to the current request.
 
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ use tracing::{debug, trace, warn};
 use crate::{
     FilterAction, FilterError, Rejection,
     body::{BodyAccess, BodyMode, limits::MAX_JSON_BODY_BYTES},
-    builtins::http::ai::store::{ResponseRecord, ResponseStore},
+    builtins::http::ai::store::{ResponseRecord, ResponseStore, ResponseStoreRegistry},
     filter::{HttpFilter, HttpFilterContext},
 };
 
@@ -36,9 +36,9 @@ const DEFAULT_TENANT_ID: &str = "default";
 // RehydrateFilter
 // -----------------------------------------------------------------------------
 
-/// Loads conversation context from `previous_response_id` by
-/// fetching stored responses and prepending their message
-/// history to the current request's `input` field.
+/// Loads conversation context from `previous_response_id` or
+/// `conversation.id` and prepends the stored message history
+/// to the current request's `input` field.
 ///
 /// # YAML
 ///
@@ -108,7 +108,15 @@ impl HttpFilter for RehydrateFilter {
     }
 }
 
-/// Core rehydration: parse body, fetch stored response, assemble
+/// Which rehydration source was found in the request body.
+enum RehydrateSource {
+    /// `previous_response_id` is set.
+    PreviousResponse(String),
+    /// `conversation.id` is set (without `previous_response_id`).
+    Conversation(String),
+}
+
+/// Core rehydration: parse body, fetch stored context, assemble
 /// conversation history, and write the enriched body back.
 async fn rehydrate_body(
     ctx: &mut HttpFilterContext<'_>,
@@ -118,7 +126,7 @@ async fn rehydrate_body(
         return Ok(FilterAction::Release);
     };
 
-    let (mut parsed, prev_id) = match parse_body_and_extract_id(bytes) {
+    let (mut parsed, source) = match parse_body_and_extract_source(bytes) {
         Ok(Some(pair)) => pair,
         Ok(None) => return Ok(FilterAction::Release),
         Err(action) => return Ok(action),
@@ -129,7 +137,25 @@ async fn rehydrate_body(
         .unwrap_or(DEFAULT_TENANT_ID)
         .to_owned();
 
-    let record = match fetch_previous_response(ctx, &tenant_id, &prev_id).await {
+    match source {
+        RehydrateSource::PreviousResponse(prev_id) => {
+            rehydrate_from_previous_response(ctx, &mut parsed, body, &tenant_id, &prev_id).await
+        },
+        RehydrateSource::Conversation(conv_id) => {
+            rehydrate_from_conversation(ctx, &mut parsed, body, &tenant_id, &conv_id).await
+        },
+    }
+}
+
+/// Rehydrate using a previous response record.
+async fn rehydrate_from_previous_response(
+    ctx: &mut HttpFilterContext<'_>,
+    parsed: &mut Value,
+    body: &mut Option<Bytes>,
+    tenant_id: &str,
+    prev_id: &str,
+) -> Result<FilterAction, FilterError> {
+    let record = match fetch_previous_response(ctx, tenant_id, prev_id).await {
         Ok(r) => r,
         Err(action) => return Ok(action),
     };
@@ -138,7 +164,7 @@ async fn rehydrate_body(
         return Ok(action);
     }
 
-    write_enriched_body(&mut parsed, &record, body)?;
+    write_enriched_body(parsed, &record, body)?;
 
     debug!(previous_response_id = %prev_id, "request rehydrated");
     ctx.set_metadata("responses.previous_response_id", prev_id);
@@ -146,22 +172,84 @@ async fn rehydrate_body(
     Ok(FilterAction::Release)
 }
 
-/// Parse the request body and extract `previous_response_id`.
+/// Rehydrate using stored conversation messages.
+async fn rehydrate_from_conversation(
+    ctx: &mut HttpFilterContext<'_>,
+    parsed: &mut Value,
+    body: &mut Option<Bytes>,
+    tenant_id: &str,
+    conv_id: &str,
+) -> Result<FilterAction, FilterError> {
+    let record = match fetch_conversation(ctx, tenant_id, conv_id).await {
+        Ok(r) => r,
+        Err(action) => return Ok(action),
+    };
+
+    let current_input = parsed.get("input").cloned().unwrap_or(Value::Null);
+    parsed["input"] = assemble_conversation(record.messages, current_input);
+
+    let new_body = serde_json::to_vec(&*parsed)
+        .map_err(|e| -> FilterError { format!("failed to serialize rehydrated body: {e}").into() })?;
+    *body = Some(Bytes::from(new_body));
+
+    debug!(conversation_id = %conv_id, "request rehydrated from conversation");
+    ctx.set_metadata("responses.conversation_id", conv_id);
+
+    Ok(FilterAction::Release)
+}
+
+/// Parse the request body and determine the rehydration source.
 ///
-/// Returns `Ok(None)` when the field is absent or null (passthrough).
-fn parse_body_and_extract_id(bytes: &[u8]) -> Result<Option<(Value, String)>, FilterAction> {
+/// Priority: `previous_response_id` > `conversation.id` > passthrough.
+/// Returns `Ok(None)` when neither field triggers rehydration.
+fn parse_body_and_extract_source(bytes: &[u8]) -> Result<Option<(Value, RehydrateSource)>, FilterAction> {
     let parsed: Value = serde_json::from_slice(bytes).map_err(|e| {
         debug!(error = %e, "rehydrate: invalid request JSON");
         reject_invalid(&format!("invalid request body: {e}"))
     })?;
 
     let prev_id = match parsed.get("previous_response_id") {
-        None | Some(Value::Null) => return Ok(None),
-        Some(Value::String(s)) => s.clone(),
+        Some(Value::String(s)) => Some(s.clone()),
+        Some(Value::Null) | None => None,
         Some(_) => return Err(reject_invalid("previous_response_id must be a string")),
     };
 
-    Ok(Some((parsed, prev_id)))
+    if let Some(id) = prev_id {
+        return Ok(Some((parsed, RehydrateSource::PreviousResponse(id))));
+    }
+
+    let conv_id = parsed
+        .get("conversation")
+        .map(extract_conversation_id)
+        .transpose()?
+        .flatten();
+
+    if let Some(id) = conv_id {
+        return Ok(Some((parsed, RehydrateSource::Conversation(id))));
+    }
+
+    Ok(None)
+}
+
+/// Extract `id` from a `conversation` object.
+///
+/// Returns `Ok(None)` when the conversation object is null or has
+/// no `id` field. Returns `Err` for type violations.
+fn extract_conversation_id(conv: &Value) -> Result<Option<String>, FilterAction> {
+    if conv.is_null() {
+        return Ok(None);
+    }
+
+    let Some(obj) = conv.as_object() else {
+        return Err(reject_invalid("conversation must be an object"));
+    };
+
+    match obj.get("id") {
+        Some(Value::String(s)) if !s.is_empty() => Ok(Some(s.clone())),
+        Some(Value::String(_)) => Err(reject_invalid("conversation.id must not be empty")),
+        Some(Value::Null) | None => Ok(None),
+        Some(_) => Err(reject_invalid("conversation.id must be a string")),
+    }
 }
 
 /// Assemble conversation history and write the enriched body.
@@ -185,21 +273,26 @@ fn write_enriched_body(
 // Fetch & Validate
 // -----------------------------------------------------------------------------
 
+/// Resolve the response store from the per-request registry.
+fn resolve_store(ctx: &HttpFilterContext<'_>) -> Result<Arc<dyn ResponseStore>, FilterAction> {
+    let registry: &ResponseStoreRegistry = ctx.response_stores.ok_or_else(|| {
+        warn!("rehydrate: response store registry not available");
+        reject_server_error("response store is not available")
+    })?;
+
+    registry.get(DEFAULT_STORE_NAME).ok_or_else(|| {
+        warn!("rehydrate: default response store not registered");
+        reject_server_error("response store is not available")
+    })
+}
+
 /// Fetch the previous response record from the store.
 async fn fetch_previous_response(
     ctx: &HttpFilterContext<'_>,
     tenant_id: &str,
     prev_id: &str,
 ) -> Result<ResponseRecord, FilterAction> {
-    let registry = ctx.response_stores.ok_or_else(|| {
-        warn!("rehydrate: response store registry not available");
-        reject_server_error("response store is not available")
-    })?;
-
-    let store: Arc<dyn ResponseStore> = registry.get(DEFAULT_STORE_NAME).ok_or_else(|| {
-        warn!("rehydrate: default response store not registered");
-        reject_server_error("response store is not available")
-    })?;
+    let store = resolve_store(ctx)?;
 
     let record = store.get_response(tenant_id, prev_id).await.map_err(|e| {
         warn!(error = %e, "rehydrate: failed to fetch previous response");
@@ -209,6 +302,25 @@ async fn fetch_previous_response(
     record.ok_or_else(|| {
         debug!(id = %prev_id, "rehydrate: previous response not found");
         reject_invalid(&format!("response '{prev_id}' not found"))
+    })
+}
+
+/// Fetch a conversation record from the store.
+async fn fetch_conversation(
+    ctx: &HttpFilterContext<'_>,
+    tenant_id: &str,
+    conv_id: &str,
+) -> Result<crate::builtins::http::ai::store::ConversationRecord, FilterAction> {
+    let store = resolve_store(ctx)?;
+
+    let record = store.get_conversation(tenant_id, conv_id).await.map_err(|e| {
+        warn!(error = %e, "rehydrate: failed to fetch conversation");
+        reject_server_error("failed to fetch conversation")
+    })?;
+
+    record.ok_or_else(|| {
+        debug!(id = %conv_id, "rehydrate: conversation not found");
+        reject_invalid(&format!("conversation '{conv_id}' not found"))
     })
 }
 
