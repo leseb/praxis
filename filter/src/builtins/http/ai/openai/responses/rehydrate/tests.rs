@@ -44,10 +44,7 @@ async fn skips_non_post_request() {
     let mut body = Some(Bytes::from(r#"{"input":"test"}"#));
 
     let action = filter.on_request_body(&mut ctx, &mut body, true).await.unwrap();
-    assert!(
-        matches!(action, FilterAction::Continue),
-        "non-POST should continue"
-    );
+    assert!(matches!(action, FilterAction::Continue), "non-POST should continue");
 }
 
 #[tokio::test]
@@ -234,9 +231,7 @@ async fn rejects_when_previous_response_not_found() {
     let mut ctx = crate::test_utils::make_filter_context(&req);
     ctx.response_stores = Some(&registry);
     ctx.set_metadata("openai_responses_format.format", "openai_responses");
-    let mut body = Some(Bytes::from(
-        r#"{"input":"Hi","previous_response_id":"resp_missing"}"#,
-    ));
+    let mut body = Some(Bytes::from(r#"{"input":"Hi","previous_response_id":"resp_missing"}"#));
 
     let action = filter.on_request_body(&mut ctx, &mut body, true).await.unwrap();
     match action {
@@ -255,9 +250,7 @@ async fn rejects_when_status_not_completed() {
     let mut ctx = crate::test_utils::make_filter_context(&req);
     ctx.response_stores = Some(&registry);
     ctx.set_metadata("openai_responses_format.format", "openai_responses");
-    let mut body = Some(Bytes::from(
-        r#"{"input":"Hi","previous_response_id":"resp_123"}"#,
-    ));
+    let mut body = Some(Bytes::from(r#"{"input":"Hi","previous_response_id":"resp_123"}"#));
 
     let action = filter.on_request_body(&mut ctx, &mut body, true).await.unwrap();
     match action {
@@ -276,9 +269,7 @@ async fn rejects_when_status_incomplete() {
     let mut ctx = crate::test_utils::make_filter_context(&req);
     ctx.response_stores = Some(&registry);
     ctx.set_metadata("openai_responses_format.format", "openai_responses");
-    let mut body = Some(Bytes::from(
-        r#"{"input":"Hi","previous_response_id":"resp_123"}"#,
-    ));
+    let mut body = Some(Bytes::from(r#"{"input":"Hi","previous_response_id":"resp_123"}"#));
 
     let action = filter.on_request_body(&mut ctx, &mut body, true).await.unwrap();
     match action {
@@ -297,9 +288,7 @@ async fn rejects_when_status_failed() {
     let mut ctx = crate::test_utils::make_filter_context(&req);
     ctx.response_stores = Some(&registry);
     ctx.set_metadata("openai_responses_format.format", "openai_responses");
-    let mut body = Some(Bytes::from(
-        r#"{"input":"Hi","previous_response_id":"resp_123"}"#,
-    ));
+    let mut body = Some(Bytes::from(r#"{"input":"Hi","previous_response_id":"resp_123"}"#));
 
     let action = filter.on_request_body(&mut ctx, &mut body, true).await.unwrap();
     match action {
@@ -314,9 +303,7 @@ async fn rejects_when_store_unavailable() {
     let req = crate::test_utils::make_request(http::Method::POST, "/v1/responses");
     let mut ctx = crate::test_utils::make_filter_context(&req);
     ctx.set_metadata("openai_responses_format.format", "openai_responses");
-    let mut body = Some(Bytes::from(
-        r#"{"input":"Hi","previous_response_id":"resp_123"}"#,
-    ));
+    let mut body = Some(Bytes::from(r#"{"input":"Hi","previous_response_id":"resp_123"}"#));
 
     let action = filter.on_request_body(&mut ctx, &mut body, true).await.unwrap();
     match action {
@@ -334,9 +321,7 @@ async fn rejects_when_store_not_registered() {
     let mut ctx = crate::test_utils::make_filter_context(&req);
     ctx.response_stores = Some(&registry);
     ctx.set_metadata("openai_responses_format.format", "openai_responses");
-    let mut body = Some(Bytes::from(
-        r#"{"input":"Hi","previous_response_id":"resp_123"}"#,
-    ));
+    let mut body = Some(Bytes::from(r#"{"input":"Hi","previous_response_id":"resp_123"}"#));
 
     let action = filter.on_request_body(&mut ctx, &mut body, true).await.unwrap();
     match action {
@@ -385,9 +370,7 @@ async fn rejects_when_store_fetch_fails() {
     let mut ctx = crate::test_utils::make_filter_context(&req);
     ctx.response_stores = Some(&registry);
     ctx.set_metadata("openai_responses_format.format", "openai_responses");
-    let mut body = Some(Bytes::from(
-        r#"{"input":"Hi","previous_response_id":"resp_123"}"#,
-    ));
+    let mut body = Some(Bytes::from(r#"{"input":"Hi","previous_response_id":"resp_123"}"#));
 
     let action = filter.on_request_body(&mut ctx, &mut body, true).await.unwrap();
     match action {

@@ -141,7 +141,8 @@ mod tests {
             &empty_kv_stores(),
             #[cfg(feature = "ai-inference")]
             &empty_response_stores(),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(
             pipelines.get("web").is_some(),
             "pipeline should exist for 'web' listener"
@@ -191,7 +192,8 @@ filter_chains:
             &empty_kv_stores(),
             #[cfg(feature = "ai-inference")]
             &empty_response_stores(),
-        ).unwrap();
+        )
+        .unwrap();
         let pipeline = pipelines.get("web").unwrap().load();
         assert!(
             pipeline.is_empty(),
@@ -232,7 +234,8 @@ filter_chains:
             &empty_kv_stores(),
             #[cfg(feature = "ai-inference")]
             &empty_response_stores(),
-        ).unwrap();
+        )
+        .unwrap();
         let pipeline = pipelines.get("web").unwrap().load();
         assert_eq!(pipeline.len(), 3, "two chains should produce 3 filters total");
     }
@@ -270,7 +273,8 @@ filter_chains:
             &empty_kv_stores(),
             #[cfg(feature = "ai-inference")]
             &empty_response_stores(),
-        ).unwrap();
+        )
+        .unwrap();
         let pipeline = pipelines.get("web").unwrap().load();
         let caps = pipeline.body_capabilities();
         assert!(caps.needs_request_body, "body limits should enable request body access");

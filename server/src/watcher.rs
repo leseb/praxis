@@ -292,18 +292,17 @@ mod tests {
         let registry = Arc::new(FilterRegistry::with_builtins());
         let health_registry = Arc::new(std::collections::HashMap::new());
         let kv_stores = praxis_core::kv::KvStoreRegistry::new();
-        let pipelines =
-            Arc::new(
-                crate::pipelines::resolve_pipelines(
-                    &config,
-                    &registry,
-                    &health_registry,
-                    &kv_stores,
-                    #[cfg(feature = "ai-inference")]
-                    &empty_response_stores(),
-                )
-                .unwrap(),
-            );
+        let pipelines = Arc::new(
+            crate::pipelines::resolve_pipelines(
+                &config,
+                &registry,
+                &health_registry,
+                &kv_stores,
+                #[cfg(feature = "ai-inference")]
+                &empty_response_stores(),
+            )
+            .unwrap(),
+        );
         let health_shutdown = Arc::new(Mutex::new(CancellationToken::new()));
         let shutdown = CancellationToken::new();
 
@@ -335,18 +334,17 @@ mod tests {
         let registry = Arc::new(FilterRegistry::with_builtins());
         let health_registry = Arc::new(std::collections::HashMap::new());
         let kv_stores = praxis_core::kv::KvStoreRegistry::new();
-        let pipelines =
-            Arc::new(
-                crate::pipelines::resolve_pipelines(
-                    &config,
-                    &registry,
-                    &health_registry,
-                    &kv_stores,
-                    #[cfg(feature = "ai-inference")]
-                    &empty_response_stores(),
-                )
-                .unwrap(),
-            );
+        let pipelines = Arc::new(
+            crate::pipelines::resolve_pipelines(
+                &config,
+                &registry,
+                &health_registry,
+                &kv_stores,
+                #[cfg(feature = "ai-inference")]
+                &empty_response_stores(),
+            )
+            .unwrap(),
+        );
         let old_ptr = Arc::as_ptr(&pipelines.get("web").unwrap().load());
         let health_shutdown = Arc::new(Mutex::new(CancellationToken::new()));
         let shutdown = CancellationToken::new();
@@ -387,18 +385,17 @@ mod tests {
         let registry = Arc::new(FilterRegistry::with_builtins());
         let health_registry = Arc::new(std::collections::HashMap::new());
         let kv_stores = praxis_core::kv::KvStoreRegistry::new();
-        let pipelines =
-            Arc::new(
-                crate::pipelines::resolve_pipelines(
-                    &config,
-                    &registry,
-                    &health_registry,
-                    &kv_stores,
-                    #[cfg(feature = "ai-inference")]
-                    &empty_response_stores(),
-                )
-                .unwrap(),
-            );
+        let pipelines = Arc::new(
+            crate::pipelines::resolve_pipelines(
+                &config,
+                &registry,
+                &health_registry,
+                &kv_stores,
+                #[cfg(feature = "ai-inference")]
+                &empty_response_stores(),
+            )
+            .unwrap(),
+        );
         let old_ptr = Arc::as_ptr(&pipelines.get("web").unwrap().load());
         let health_shutdown = Arc::new(Mutex::new(CancellationToken::new()));
         let shutdown = CancellationToken::new();
@@ -469,18 +466,17 @@ mod tests {
         let registry = Arc::new(FilterRegistry::with_builtins());
         let health_registry = Arc::new(std::collections::HashMap::new());
         let kv_stores = praxis_core::kv::KvStoreRegistry::new();
-        let pipelines =
-            Arc::new(
-                crate::pipelines::resolve_pipelines(
-                    &config,
-                    &registry,
-                    &health_registry,
-                    &kv_stores,
-                    #[cfg(feature = "ai-inference")]
-                    &empty_response_stores(),
-                )
-                .unwrap(),
-            );
+        let pipelines = Arc::new(
+            crate::pipelines::resolve_pipelines(
+                &config,
+                &registry,
+                &health_registry,
+                &kv_stores,
+                #[cfg(feature = "ai-inference")]
+                &empty_response_stores(),
+            )
+            .unwrap(),
+        );
         let health_shutdown = Arc::new(Mutex::new(CancellationToken::new()));
         let shutdown = CancellationToken::new();
 

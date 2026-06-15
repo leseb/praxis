@@ -50,6 +50,8 @@ fn resolve_listener_pipeline(config: &Config, listener: &Listener, registry: &Fi
             config.insecure_options.allow_unbounded_body,
         )
         .unwrap();
+    #[cfg(feature = "ai-inference")]
+    pipeline.set_response_stores(praxis_filter::ResponseStoreRegistry::new());
     Arc::new(pipeline)
 }
 

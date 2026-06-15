@@ -384,14 +384,11 @@ impl HttpFilter for ResponseStoreFilter {
     }
 
     async fn on_request(&self, ctx: &mut HttpFilterContext<'_>) -> Result<FilterAction, FilterError> {
-        if should_skip(ctx) {
-            return Ok(FilterAction::Continue);
-        }
-
         let store_opt = self.store.get_or_init(|| async { self.init_store().await }).await;
         match store_opt {
             Some(store) => register_store_in_context(ctx, store),
-            None => ctx.set_metadata("responses.skip_persist", "true"),
+            None if !should_skip(ctx) => ctx.set_metadata("responses.skip_persist", "true"),
+            None => {},
         }
 
         Ok(FilterAction::Continue)
