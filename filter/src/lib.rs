@@ -31,6 +31,8 @@ pub use builtins::PromptEnrichFilter;
 #[cfg(feature = "ai-inference")]
 pub use builtins::ResponseStoreRegistry;
 #[cfg(feature = "ai-inference")]
+pub use builtins::RehydrateFilter;
+#[cfg(feature = "ai-inference")]
 pub use builtins::ResponsesFormatFilter;
 pub use builtins::{
     CircuitBreakerFilter, ContainsValue, CredentialInjectionFilter, DisallowedOriginMode, GuardrailsAction,

@@ -18,6 +18,8 @@ pub use ai::OpenaiResponsesValidateFilter;
 #[cfg(feature = "ai-inference")]
 pub use ai::PromptEnrichFilter;
 #[cfg(feature = "ai-inference")]
+pub use ai::RehydrateFilter;
+#[cfg(feature = "ai-inference")]
 pub use ai::ResponseStoreFilter;
 #[cfg(feature = "ai-inference")]
 pub use ai::ResponseStoreRegistry;
