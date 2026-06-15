@@ -83,7 +83,17 @@ pub fn run_server_with_registry(config: Config, registry: FilterRegistry, config
 
     let health_registry = build_health_registry(&config.clusters);
     let kv_stores = praxis_core::kv::KvStoreRegistry::new();
-    let pipelines = resolve_pipelines(&config, &registry, &health_registry, &kv_stores).unwrap_or_else(|e| fatal(&e));
+    #[cfg(feature = "ai-inference")]
+    let response_stores = praxis_filter::ResponseStoreRegistry::new();
+    let pipelines = resolve_pipelines(
+        &config,
+        &registry,
+        &health_registry,
+        &kv_stores,
+        #[cfg(feature = "ai-inference")]
+        &response_stores,
+    )
+    .unwrap_or_else(|e| fatal(&e));
     let pipelines = Arc::new(pipelines);
 
     info!("initializing server");
@@ -102,7 +112,16 @@ pub fn run_server_with_registry(config: Config, registry: FilterRegistry, config
 
     let health_shutdown = Arc::new(Mutex::new(CancellationToken::new()));
     spawn_health_check_tasks(&config, &health_registry, &health_shutdown);
-    let _watcher = spawn_watcher(config_path, config, registry, &pipelines, &health_shutdown, kv_stores);
+    let _watcher = spawn_watcher(
+        config_path,
+        config,
+        registry,
+        &pipelines,
+        &health_shutdown,
+        kv_stores,
+        #[cfg(feature = "ai-inference")]
+        response_stores,
+    );
 
     info!("starting server");
     server.run()
@@ -142,6 +161,7 @@ fn spawn_watcher(
     pipelines: &Arc<ListenerPipelines>,
     health_shutdown: &Arc<Mutex<CancellationToken>>,
     kv_stores: praxis_core::kv::KvStoreRegistry,
+    #[cfg(feature = "ai-inference")] response_stores: praxis_filter::ResponseStoreRegistry,
 ) -> Option<std::thread::JoinHandle<()>> {
     let path = config_path?;
     let handle = crate::watcher::spawn_config_watcher(crate::watcher::WatcherParams {
@@ -151,6 +171,8 @@ fn spawn_watcher(
         kv_stores,
         pipelines: Arc::clone(pipelines),
         registry: Arc::new(registry),
+        #[cfg(feature = "ai-inference")]
+        response_stores,
         shutdown: CancellationToken::new(),
     });
     Some(handle)
