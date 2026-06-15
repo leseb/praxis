@@ -231,7 +231,7 @@ fn response_body_mode_is_bounded_stream_buffer() {
 // -----------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn on_request_skips_when_format_metadata_absent() {
+async fn on_request_initializes_store_even_without_format_metadata() {
     let filter = make_filter();
     let req = crate::test_utils::make_request(http::Method::POST, "/v1/responses");
     let mut ctx = crate::test_utils::make_filter_context(&req);
@@ -239,16 +239,16 @@ async fn on_request_skips_when_format_metadata_absent() {
     let action = filter.on_request(&mut ctx).await.unwrap();
     assert!(
         matches!(action, FilterAction::Continue),
-        "should skip when format metadata is absent"
+        "should continue when format metadata is absent"
     );
     assert!(
-        filter.store.get().is_none(),
-        "store should not be initialized when skipped"
+        filter.store.get().is_some(),
+        "store should be eagerly initialized for downstream filters"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn on_request_skips_when_format_is_openai_chat_completions() {
+async fn on_request_initializes_store_for_non_responses_format() {
     let filter = make_filter();
     let req = crate::test_utils::make_request(http::Method::POST, "/v1/chat/completions");
     let mut ctx = crate::test_utils::make_filter_context(&req);
@@ -257,16 +257,16 @@ async fn on_request_skips_when_format_is_openai_chat_completions() {
     let action = filter.on_request(&mut ctx).await.unwrap();
     assert!(
         matches!(action, FilterAction::Continue),
-        "should skip when format is openai_chat_completions"
+        "should continue for non-responses format"
     );
     assert!(
-        filter.store.get().is_none(),
-        "store should not be initialized for non-responses format"
+        filter.store.get().is_some(),
+        "store should be eagerly initialized regardless of format"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn on_request_skips_when_store_is_false() {
+async fn on_request_initializes_store_when_store_is_false() {
     let filter = make_filter();
     let req = crate::test_utils::make_request(http::Method::POST, "/v1/responses");
     let mut ctx = crate::test_utils::make_filter_context(&req);
@@ -276,16 +276,16 @@ async fn on_request_skips_when_store_is_false() {
     let action = filter.on_request(&mut ctx).await.unwrap();
     assert!(
         matches!(action, FilterAction::Continue),
-        "should skip when store is false"
+        "should continue when store is false"
     );
     assert!(
-        filter.store.get().is_none(),
-        "store should not be initialized when store=false"
+        filter.store.get().is_some(),
+        "store should be eagerly initialized even when persistence disabled"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn on_request_skips_when_stream_is_true() {
+async fn on_request_initializes_store_for_streaming() {
     let filter = make_filter();
     let req = crate::test_utils::make_request(http::Method::POST, "/v1/responses");
     let mut ctx = crate::test_utils::make_filter_context(&req);
@@ -295,11 +295,11 @@ async fn on_request_skips_when_stream_is_true() {
     let action = filter.on_request(&mut ctx).await.unwrap();
     assert!(
         matches!(action, FilterAction::Continue),
-        "should skip when stream is true"
+        "should continue for streaming requests"
     );
     assert!(
-        filter.store.get().is_none(),
-        "store should not be initialized for streaming requests"
+        filter.store.get().is_some(),
+        "store should be eagerly initialized for streaming requests"
     );
 }
 
@@ -354,6 +354,44 @@ async fn on_request_initializes_store_for_openai_responses_format() {
     assert!(
         store_opt.is_some(),
         "store should be Some for valid sqlite::memory: config"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// on_request Registry
+// -----------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn on_request_registers_store_in_response_stores() {
+    let filter = make_filter();
+    let req = crate::test_utils::make_request(http::Method::POST, "/v1/responses");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    let registry = crate::builtins::http::ai::store::ResponseStoreRegistry::new();
+    ctx.response_stores = Some(&registry);
+    ctx.set_metadata("openai_responses_format.format", "openai_responses");
+
+    let action = filter.on_request(&mut ctx).await.unwrap();
+    assert!(
+        matches!(action, FilterAction::Continue),
+        "should continue after registering store"
+    );
+    assert!(
+        registry.get("default").is_some(),
+        "store should be registered as 'default' in response_stores"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn on_request_skips_registration_when_no_registry() {
+    let filter = make_filter();
+    let req = crate::test_utils::make_request(http::Method::POST, "/v1/responses");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    ctx.set_metadata("openai_responses_format.format", "openai_responses");
+
+    let action = filter.on_request(&mut ctx).await.unwrap();
+    assert!(
+        matches!(action, FilterAction::Continue),
+        "should continue even without registry"
     );
 }
 

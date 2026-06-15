@@ -133,6 +133,7 @@ page.
 | [format-routing.yaml](configs/ai/openai/responses/format-routing.yaml) | Route by AI API format (Responses vs Chat Completions) |
 | [responses-routing.yaml](configs/ai/openai/responses/responses-routing.yaml) | Route Responses API by mode (stateless vs stateful) |
 | [request-validate.yaml](configs/ai/openai/responses/request-validate.yaml) | Validate Responses API requests and reject invalid parameter combinations |
+| [rehydrate.yaml](configs/ai/openai/responses/rehydrate.yaml) | Load conversation context from previous_response_id for multi-turn conversations |
 | [response-store.yaml](configs/ai/openai/responses/response-store.yaml) | Persist and retrieve responses via GET /v1/responses/{id} |
 
 ### Branching
