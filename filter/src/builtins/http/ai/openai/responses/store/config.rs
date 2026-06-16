@@ -94,6 +94,13 @@ pub(crate) fn validate_config(cfg: &ResponseStoreConfig) -> Result<(), FilterErr
     if database_url.is_empty() {
         return Err("openai_response_store: 'database_url' must not be empty".into());
     }
+    validate_table_identifier(&cfg.responses_table)
+        .map_err(|e| format!("openai_response_store: invalid responses_table: {e}"))?;
+    validate_table_identifier(&cfg.conversations_table)
+        .map_err(|e| format!("openai_response_store: invalid conversations_table: {e}"))?;
+    if cfg.responses_table.eq_ignore_ascii_case(&cfg.conversations_table) {
+        return Err("openai_response_store: response and conversation table names must be distinct".into());
+    }
     match cfg.backend {
         StorageBackend::Sqlite => {
             validate_sqlite_database_url(database_url)?;
@@ -105,13 +112,6 @@ pub(crate) fn validate_config(cfg: &ResponseStoreConfig) -> Result<(), FilterErr
                 .map_err(|e| format!("openai_response_store: invalid postgres table identifier: {e}"))?;
             validate_postgres_ssl_config(cfg, database_url)?;
         },
-    }
-    validate_table_identifier(&cfg.responses_table)
-        .map_err(|e| format!("openai_response_store: invalid responses_table: {e}"))?;
-    validate_table_identifier(&cfg.conversations_table)
-        .map_err(|e| format!("openai_response_store: invalid conversations_table: {e}"))?;
-    if cfg.responses_table.eq_ignore_ascii_case(&cfg.conversations_table) {
-        return Err("openai_response_store: response and conversation table names must be distinct".into());
     }
     Ok(())
 }
@@ -127,6 +127,33 @@ fn validate_sqlite_database_url(database_url: &str) -> Result<(), FilterError> {
     let path = sqlite_file_path(database_url).unwrap_or(database_url);
     if has_dot_dot_traversal(path) {
         return Err("openai_response_store: database_url must not contain '..' path traversal".into());
+    }
+    Ok(())
+}
+
+/// Re-validate only the `PostgreSQL` host/IP portions of the
+/// connection URL immediately before `SQLx` resolves and connects.
+///
+/// Full config validation runs once at construction time in
+/// [`validate_config`]. This narrower check guards against DNS
+/// rebinding between validation and connection by re-checking
+/// the SSRF-sensitive host rules on every retry without
+/// redundantly re-validating immutable fields (table names, SSL
+/// config, URL scheme).
+pub(crate) fn revalidate_postgres_host(cfg: &ResponseStoreConfig) -> Result<(), FilterError> {
+    let database_url = cfg.database_url.expose_secret();
+    let Some(after_scheme) = postgres_url_after_scheme(database_url) else {
+        return Ok(());
+    };
+    if let Some(host) = postgres_authority_host(after_scheme) {
+        validate_postgres_host_value("host", &host, cfg.allow_private_database_url)?;
+    }
+    for (key, value) in postgres_query_params(database_url) {
+        if is_postgres_hostaddr_param(&key) {
+            validate_postgres_hostaddr(&value, cfg.allow_private_database_url)?;
+        } else if is_postgres_host_param(&key) {
+            validate_postgres_host_value(&key, &value, cfg.allow_private_database_url)?;
+        }
     }
     Ok(())
 }

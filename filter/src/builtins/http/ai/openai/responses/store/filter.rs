@@ -46,7 +46,7 @@ use tracing::{debug, trace, warn};
 
 use super::{
     ListParams, Order,
-    config::{ResponseStoreConfig, StorageBackend, validate_config},
+    config::{ResponseStoreConfig, StorageBackend, revalidate_postgres_host, validate_config},
     list_input_items,
 };
 use crate::{
@@ -132,10 +132,8 @@ impl ResponseStoreFilter {
             },
 
             StorageBackend::Postgres => {
-                // DNS hostnames are validated again immediately before SQLx
-                // resolves and connects, including every Postgres retry.
-                validate_config(&self.config).map_err(|e| {
-                    StoreError::Unavailable(format!("postgres config validation failed before connect: {e}"))
+                revalidate_postgres_host(&self.config).map_err(|e| {
+                    StoreError::Unavailable(format!("postgres host validation failed before connect: {e}"))
                 })?;
                 let ssl_root_cert = self.config.ssl_root_cert.as_ref().map(|s| {
                     let secret: &str = s.expose_secret();
@@ -169,7 +167,7 @@ impl ResponseStoreFilter {
         Ok(store)
     }
 
-    /// Initialize a SQLite store once, caching failed init permanently.
+    /// Initialize a store once, caching failed init permanently.
     async fn init_permanent_store(&self) -> Option<Arc<dyn ResponseStore>> {
         match self.build_logged_store().await {
             Ok(store) => Some(store),
