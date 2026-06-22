@@ -20,6 +20,25 @@
 ///
 /// [`RequestExtensions`]: crate::extensions::RequestExtensions
 pub(crate) struct ResponsesState {
+    /// Truncation strategy for managing context window limits.
+    ///
+    /// Preserves the full object from the request so filters can
+    /// inspect both the strategy type and any parameters.
+    pub context_management: Option<serde_json::Value>,
+
+    /// Conversation scope for multi-turn state.
+    ///
+    /// Can be a string ID or an object with `id`. Controls which
+    /// stored conversation this request belongs to.
+    pub conversation: Option<serde_json::Value>,
+
+    /// Additional fields to include in the response.
+    ///
+    /// E.g. `["usage"]`, `["file_search_results"]`. Filters that
+    /// construct the response object check this to decide which
+    /// optional sections to populate.
+    pub include: Vec<String>,
+
     /// The current request's input items, immutable after construction.
     ///
     /// Preserved as-is so downstream filters can inspect what the
@@ -30,6 +49,12 @@ pub(crate) struct ResponsesState {
     /// Current agentic loop iteration (0-indexed). Incremented by
     /// `tool_dispatch` at the start of each new inference round.
     pub iteration: u32,
+
+    /// Maximum number of tool-call rounds in the agentic loop.
+    ///
+    /// `tool_dispatch` checks this to cap iterations. `None` means
+    /// no explicit limit was set by the client.
+    pub max_tool_calls: Option<u32>,
 
     /// Resolved conversation history sent to the backend.
     ///
@@ -42,6 +67,16 @@ pub(crate) struct ResponsesState {
 
     /// Output items accumulated across the current response.
     pub output_items: Vec<serde_json::Value>,
+
+    /// Whether tool calls may execute concurrently within an
+    /// iteration. Defaults to `true` per the API spec.
+    pub parallel_tool_calls: bool,
+
+    /// ID of a previous response to continue from.
+    ///
+    /// When set, `rehydrate` fetches the stored conversation
+    /// history for this response and prepends it to `messages`.
+    pub previous_response_id: Option<String>,
 
     /// Parsed request body as received from the client.
     pub request_body: serde_json::Value,
@@ -75,23 +110,28 @@ impl ResponsesState {
     /// Create initial state from a parsed request body.
     pub(crate) fn from_request_body(body: serde_json::Value) -> Self {
         let messages = normalize_input(&body);
-        let tools = extract_array_field(&body, "tools");
         let tool_choice = body
             .get("tool_choice")
             .cloned()
             .unwrap_or_else(|| serde_json::Value::String("auto".to_owned()));
 
         Self {
+            context_management: body.get("context_management").cloned(),
+            conversation: body.get("conversation").cloned(),
+            include: extract_string_array(&body, "include"),
             input: messages.clone(),
             iteration: 0,
+            max_tool_calls: extract_u32(&body, "max_tool_calls"),
             messages,
             output_items: Vec::new(),
-            request_body: body,
+            parallel_tool_calls: extract_bool_or(&body, "parallel_tool_calls", true),
+            previous_response_id: extract_string(&body, "previous_response_id"),
             response_object: serde_json::Value::Null,
             tool_calls: Vec::new(),
             tool_choice,
-            tools,
+            tools: extract_array_field(&body, "tools"),
             usage: serde_json::Value::Null,
+            request_body: body,
         }
     }
 }
@@ -121,6 +161,38 @@ fn extract_array_field(body: &serde_json::Value, field: &str) -> Vec<serde_json:
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+/// Extract a string field by name.
+fn extract_string(body: &serde_json::Value, field: &str) -> Option<String> {
+    body.get(field)
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+/// Extract an array of strings by name, defaulting to empty.
+fn extract_string_array(body: &serde_json::Value, field: &str) -> Vec<String> {
+    body.get(field)
+        .and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Extract a `u32` field by name.
+fn extract_u32(body: &serde_json::Value, field: &str) -> Option<u32> {
+    body.get(field)
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok())
+}
+
+/// Extract a bool field by name, returning a default if absent.
+fn extract_bool_or(body: &serde_json::Value, field: &str, default: bool) -> bool {
+    body.get(field).and_then(serde_json::Value::as_bool).unwrap_or(default)
 }
 
 // -----------------------------------------------------------------------------
@@ -254,5 +326,89 @@ mod tests {
         let body = json!({"model": "gpt-4o", "input": "hello", "temperature": 0.7});
         let state = ResponsesState::from_request_body(body.clone());
         assert_eq!(state.request_body, body, "original request body should be preserved");
+    }
+
+    #[test]
+    fn extracts_previous_response_id() {
+        let body = json!({"model": "gpt-4o", "input": "test", "previous_response_id": "resp_abc123"});
+        let state = ResponsesState::from_request_body(body);
+        assert_eq!(state.previous_response_id.as_deref(), Some("resp_abc123"));
+    }
+
+    #[test]
+    fn previous_response_id_defaults_to_none() {
+        let body = json!({"model": "gpt-4o", "input": "test"});
+        let state = ResponsesState::from_request_body(body);
+        assert!(state.previous_response_id.is_none());
+    }
+
+    #[test]
+    fn extracts_conversation_string() {
+        let body = json!({"model": "gpt-4o", "input": "test", "conversation": "conv_xyz"});
+        let state = ResponsesState::from_request_body(body);
+        assert_eq!(state.conversation, Some(json!("conv_xyz")));
+    }
+
+    #[test]
+    fn extracts_conversation_object() {
+        let body = json!({"model": "gpt-4o", "input": "test", "conversation": {"id": "conv_xyz"}});
+        let state = ResponsesState::from_request_body(body);
+        assert_eq!(state.conversation, Some(json!({"id": "conv_xyz"})));
+    }
+
+    #[test]
+    fn extracts_context_management() {
+        let body = json!({
+            "model": "gpt-4o",
+            "input": "test",
+            "context_management": {"type": "truncation", "max_tokens": 4096}
+        });
+        let state = ResponsesState::from_request_body(body);
+        assert_eq!(
+            state.context_management,
+            Some(json!({"type": "truncation", "max_tokens": 4096}))
+        );
+    }
+
+    #[test]
+    fn extracts_include() {
+        let body = json!({"model": "gpt-4o", "input": "test", "include": ["usage", "file_search_results"]});
+        let state = ResponsesState::from_request_body(body);
+        assert_eq!(state.include, vec!["usage", "file_search_results"]);
+    }
+
+    #[test]
+    fn include_defaults_to_empty() {
+        let body = json!({"model": "gpt-4o", "input": "test"});
+        let state = ResponsesState::from_request_body(body);
+        assert!(state.include.is_empty());
+    }
+
+    #[test]
+    fn extracts_max_tool_calls() {
+        let body = json!({"model": "gpt-4o", "input": "test", "max_tool_calls": 5});
+        let state = ResponsesState::from_request_body(body);
+        assert_eq!(state.max_tool_calls, Some(5));
+    }
+
+    #[test]
+    fn max_tool_calls_defaults_to_none() {
+        let body = json!({"model": "gpt-4o", "input": "test"});
+        let state = ResponsesState::from_request_body(body);
+        assert!(state.max_tool_calls.is_none());
+    }
+
+    #[test]
+    fn parallel_tool_calls_defaults_to_true() {
+        let body = json!({"model": "gpt-4o", "input": "test"});
+        let state = ResponsesState::from_request_body(body);
+        assert!(state.parallel_tool_calls);
+    }
+
+    #[test]
+    fn parallel_tool_calls_explicit_false() {
+        let body = json!({"model": "gpt-4o", "input": "test", "parallel_tool_calls": false});
+        let state = ResponsesState::from_request_body(body);
+        assert!(!state.parallel_tool_calls);
     }
 }
