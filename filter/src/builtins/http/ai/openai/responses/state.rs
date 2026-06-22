@@ -20,17 +20,24 @@
 ///
 /// [`RequestExtensions`]: crate::extensions::RequestExtensions
 pub(crate) struct ResponsesState {
+    /// The current request's input items, immutable after construction.
+    ///
+    /// Preserved as-is so downstream filters can inspect what the
+    /// client actually sent, independent of conversation history
+    /// resolved by `rehydrate`.
+    pub input: Vec<serde_json::Value>,
+
     /// Current agentic loop iteration (0-indexed). Incremented by
     /// `tool_dispatch` at the start of each new inference round.
     pub iteration: u32,
 
-    /// Full accumulated conversation history across all turns.
+    /// Resolved conversation history sent to the backend.
     ///
-    /// When `previous_response_id` is set, `rehydrate` fetches the
-    /// stored history and writes the complete message sequence here.
-    /// When no previous response exists, contains only the current
-    /// request's input. `responses_proxy` reads this as the
-    /// authoritative conversation to send to the backend.
+    /// Initialized from the current request's input. When
+    /// `previous_response_id` is set, `rehydrate` prepends stored
+    /// history. `tool_dispatch` appends tool results during agentic
+    /// loops. `responses_proxy` reads this as the authoritative
+    /// conversation to send to the backend.
     pub messages: Vec<serde_json::Value>,
 
     /// Output items accumulated across the current response.
@@ -75,6 +82,7 @@ impl ResponsesState {
             .unwrap_or_else(|| serde_json::Value::String("auto".to_owned()));
 
         Self {
+            input: messages.clone(),
             iteration: 0,
             messages,
             output_items: Vec::new(),
@@ -139,16 +147,16 @@ mod tests {
             "input": "Hello, world!"
         });
         let state = ResponsesState::from_request_body(body);
-        assert_eq!(state.messages.len(), 1, "string input should produce one message");
+        assert_eq!(state.input.len(), 1, "string input should produce one item");
         assert_eq!(
-            state.messages[0]["role"], "user",
+            state.input[0]["role"], "user",
             "string input should default to user role"
         );
         assert_eq!(
-            state.messages[0]["type"], "message",
+            state.input[0]["type"], "message",
             "string input should produce a Responses message item"
         );
-        assert_eq!(state.messages[0]["content"], "Hello, world!");
+        assert_eq!(state.input[0]["content"], "Hello, world!");
     }
 
     #[test]
@@ -161,14 +169,30 @@ mod tests {
             ]
         });
         let state = ResponsesState::from_request_body(body);
-        assert_eq!(state.messages.len(), 2, "array input should preserve all messages");
+        assert_eq!(state.input.len(), 2, "array input should preserve all items");
     }
 
     #[test]
     fn from_request_body_empty_input() {
         let body = json!({"model": "gpt-4o"});
         let state = ResponsesState::from_request_body(body);
-        assert!(state.messages.is_empty(), "missing input should produce empty messages");
+        assert!(state.input.is_empty(), "missing input should produce empty input");
+    }
+
+    #[test]
+    fn input_and_messages_start_identical() {
+        let body = json!({
+            "model": "gpt-4o",
+            "input": [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi"}
+            ]
+        });
+        let state = ResponsesState::from_request_body(body);
+        assert_eq!(
+            state.input, state.messages,
+            "input and messages should be identical at construction"
+        );
     }
 
     #[test]
