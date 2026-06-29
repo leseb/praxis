@@ -739,6 +739,10 @@ fn store_error_response(error: &StoreError) -> Result<Rejection, FilterError> {
 }
 
 /// Refresh the denormalized conversation message cache from item rows.
+///
+/// Re-reads all items on every mutation rather than patching the JSON
+/// array incrementally. Acceptable because conversations hold a small
+/// number of items; incremental updates would risk drift.
 async fn sync_conversation_messages(
     store: &dyn ConversationItemStore,
     record: ConversationRecord,
