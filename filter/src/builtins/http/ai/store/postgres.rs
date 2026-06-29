@@ -454,6 +454,37 @@ impl ConversationItemStore for PostgresResponseStore {
         rows.iter().map(row_to_conversation_item_record).collect()
     }
 
+    async fn get_existing_conversation_item_ids(
+        &self,
+        tenant_id: &str,
+        conversation_id: &str,
+        item_ids: &[&str],
+    ) -> Result<Vec<String>, StoreError> {
+        let table = self
+            .tables
+            .items
+            .as_deref()
+            .ok_or_else(|| StoreError::Unavailable("items table not configured".to_owned()))?;
+
+        if item_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let sql = format!(
+            "SELECT item_id FROM {table} \
+             WHERE tenant_id = $1 AND conversation_id = $2 AND item_id = ANY($3)"
+        );
+
+        let ids: Vec<&str> = item_ids.to_vec();
+        sqlx::query_scalar::<_, String>(AssertSqlSafe(sql.as_str()))
+            .bind(tenant_id)
+            .bind(conversation_id)
+            .bind(&ids)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))
+    }
+
     async fn get_conversation_item(
         &self,
         tenant_id: &str,

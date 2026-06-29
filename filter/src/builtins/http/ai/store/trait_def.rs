@@ -167,6 +167,20 @@ pub trait ConversationItemStore: Send + Sync {
         ascending: bool,
     ) -> Result<Vec<ConversationItemRecord>, StoreError>;
 
+    /// Return the subset of `item_ids` that already exist in a
+    /// conversation, in a single round-trip.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError`] if the items table is not configured
+    /// or a database operation fails.
+    async fn get_existing_conversation_item_ids(
+        &self,
+        tenant_id: &str,
+        conversation_id: &str,
+        item_ids: &[&str],
+    ) -> Result<Vec<String>, StoreError>;
+
     /// Retrieve a single item by ID, scoped to tenant and
     /// conversation.
     ///

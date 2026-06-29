@@ -396,6 +396,41 @@ impl ConversationItemStore for SqliteResponseStore {
         rows.iter().map(row_to_conversation_item_record).collect()
     }
 
+    async fn get_existing_conversation_item_ids(
+        &self,
+        tenant_id: &str,
+        conversation_id: &str,
+        item_ids: &[&str],
+    ) -> Result<Vec<String>, StoreError> {
+        let table = self
+            .tables
+            .items
+            .as_deref()
+            .ok_or_else(|| StoreError::Unavailable("items table not configured".to_owned()))?;
+
+        if item_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let placeholders: String = std::iter::repeat_n("?", item_ids.len()).collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "SELECT item_id FROM {table} \
+             WHERE tenant_id = ? AND conversation_id = ? AND item_id IN ({placeholders})"
+        );
+
+        let mut query = sqlx::query_scalar::<_, String>(AssertSqlSafe(sql.as_str()))
+            .bind(tenant_id)
+            .bind(conversation_id);
+        for id in item_ids {
+            query = query.bind(*id);
+        }
+
+        query
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StoreError::Database(e.to_string()))
+    }
+
     async fn get_conversation_item(
         &self,
         tenant_id: &str,

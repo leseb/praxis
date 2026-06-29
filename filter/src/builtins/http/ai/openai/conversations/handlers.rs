@@ -290,13 +290,17 @@ pub(super) async fn handle_create_items(
             &duplicate_item_id_message(item_id),
         )?));
     }
-    let dup = match existing_item_id(store, tenant_id, conversation_id, &item_records).await {
-        Ok(id) => id,
+    let requested_ids: Vec<&str> = item_records.iter().map(|r| r.item_id.as_str()).collect();
+    let already_present = match store
+        .get_existing_conversation_item_ids(tenant_id, conversation_id, &requested_ids)
+        .await
+    {
+        Ok(ids) => ids,
         Err(e) => return Ok(FilterAction::Reject(store_error_response(&e)?)),
     };
-    if let Some(item_id) = dup {
+    if let Some(item_id) = already_present.first() {
         return Ok(FilterAction::Reject(invalid_input_response(
-            &existing_item_id_message(&item_id),
+            &existing_item_id_message(item_id),
         )?));
     }
 
@@ -785,23 +789,4 @@ async fn collect_conversation_messages(
         }
     }
     Ok(messages)
-}
-
-/// Return the first requested item ID that already exists in this conversation.
-async fn existing_item_id(
-    store: &dyn ConversationItemStore,
-    tenant_id: &str,
-    conversation_id: &str,
-    items: &[ConversationItemRecord],
-) -> Result<Option<String>, StoreError> {
-    for item in items {
-        if store
-            .get_conversation_item(tenant_id, conversation_id, &item.item_id)
-            .await?
-            .is_some()
-        {
-            return Ok(Some(item.item_id.clone()));
-        }
-    }
-    Ok(None)
 }
