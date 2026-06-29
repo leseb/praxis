@@ -204,9 +204,10 @@ impl FilterPipeline {
                 trace!(filter = pf.filter.name(), "skipped body (body_done)");
                 continue;
             }
-            let Some(http_filter) =
-                as_response_body_filter(&pf.filter, &pf.response_conditions, response_header)
-            else { continue };
+            let Some(http_filter) = as_response_body_filter(&pf.filter, &pf.response_conditions, response_header)
+            else {
+                continue;
+            };
             ctx.current_filter_id = Some(pf.filter_id);
             trace!(filter = http_filter.name(), "on_response_body");
             let outcome = dispatch_body_result(
@@ -219,9 +220,7 @@ impl FilterPipeline {
             match outcome? {
                 BodyFilterOutcome::Continue => {},
                 BodyFilterOutcome::Released => released = true,
-                BodyFilterOutcome::BodyDone => {
-                    ctx.body_done_indices[idx] = true;
-                },
+                BodyFilterOutcome::BodyDone => ctx.body_done_indices[idx] = true,
                 BodyFilterOutcome::Rejected(r) => return Ok(FilterAction::Reject(r)),
             }
         }
