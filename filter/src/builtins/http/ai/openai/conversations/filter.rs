@@ -302,11 +302,10 @@ impl HttpFilter for OpenaiConversationsFilter {
                     max_bytes: Some(MAX_JSON_BODY_BYTES),
                 });
                 let deferred_body = Self::mark_request_filters_ran(ctx);
-                let store = self.get_or_init_store().await;
                 let Some(body) = deferred_body else {
                     return Ok(FilterAction::Continue);
                 };
-                let Some(store) = store else {
+                let Some(store) = self.get_or_init_store().await else {
                     return Ok(FilterAction::Reject(reject_store_unavailable()));
                 };
                 Box::pin(Self::handle_post_route(ctx, store.as_ref(), route, &body)).await

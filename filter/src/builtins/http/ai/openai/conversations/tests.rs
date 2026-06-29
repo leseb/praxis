@@ -18,7 +18,6 @@ use crate::{
     test_utils::{make_filter_context, make_request},
 };
 
-/// Parse the body out of a rejection for assertions.
 fn rejection_body(rejection: &crate::Rejection) -> Value {
     serde_json::from_slice(rejection.body.as_deref().unwrap()).unwrap()
 }
@@ -1005,7 +1004,7 @@ async fn create_items_rejects_existing_id_without_overwrite() {
 }
 
 // -----------------------------------------------------------------------------
-// Test Helpers
+// Test Utilities
 // -----------------------------------------------------------------------------
 
 fn build_test_filter() -> Box<dyn HttpFilter> {
