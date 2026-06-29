@@ -168,7 +168,6 @@ impl FilterPipeline {
     /// Returns [`FilterError`] if any body filter fails.
     ///
     /// [`BodyDone`]: FilterAction::BodyDone
-    #[expect(clippy::indexing_slicing, reason = "idx bounded by filters.len()")]
     pub fn execute_http_response_body(
         &self,
         ctx: &mut HttpFilterContext<'_>,
@@ -182,10 +181,9 @@ impl FilterPipeline {
         self.execute_http_response_body_with_response_header(ctx, body, end_of_stream, response_header.as_ref())
     }
 
-    /// Run all HTTP response body filters in reverse order.
-    ///
-    /// Uses `response_header` to evaluate `response_conditions`
-    /// after the protocol layer has left the response-header phase.
+    /// Run all HTTP response body filters in reverse order, using `response_header`
+    /// to evaluate `response_conditions` after the protocol layer has left the
+    /// response-header phase.
     ///
     /// # Errors
     ///
@@ -206,10 +204,9 @@ impl FilterPipeline {
                 trace!(filter = pf.filter.name(), "skipped body (body_done)");
                 continue;
             }
-            let Some(http_filter) = as_response_body_filter(&pf.filter, &pf.response_conditions, response_header)
-            else {
-                continue;
-            };
+            let Some(http_filter) =
+                as_response_body_filter(&pf.filter, &pf.response_conditions, response_header)
+            else { continue };
             ctx.current_filter_id = Some(pf.filter_id);
             trace!(filter = http_filter.name(), "on_response_body");
             let outcome = dispatch_body_result(

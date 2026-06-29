@@ -138,7 +138,7 @@ pub(super) fn skip_by_response_conditions(
     resp_conditions: &[praxis_core::config::ResponseCondition],
     ctx: &HttpFilterContext<'_>,
 ) -> bool {
-    let response_header = ctx.response_header.as_ref().map(|resp| &**resp);
+    let response_header = ctx.response_header.as_deref();
     skip_by_response_conditions_with_header(http_filter, resp_conditions, response_header)
 }
 
