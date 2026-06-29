@@ -14,7 +14,7 @@ use crate::{
     any_filter::AnyFilter,
     body::BodyAccess,
     condition::{should_execute, should_execute_response_ref},
-    context::HttpFilterContext,
+    context::{HttpFilterContext, Response},
 };
 
 // -----------------------------------------------------------------------------
@@ -61,7 +61,7 @@ pub(super) fn as_request_body_filter<'a>(
 pub(super) fn as_response_body_filter<'a>(
     filter: &'a AnyFilter,
     resp_conditions: &[praxis_core::config::ResponseCondition],
-    ctx: &HttpFilterContext<'_>,
+    response_header: Option<&Response>,
 ) -> Option<&'a dyn crate::filter::HttpFilter> {
     let http_filter = match filter {
         AnyFilter::Http(f) => f.as_ref(),
@@ -70,7 +70,7 @@ pub(super) fn as_response_body_filter<'a>(
     if http_filter.response_body_access() == BodyAccess::None {
         return None;
     }
-    if skip_by_response_conditions(http_filter, resp_conditions, ctx) {
+    if skip_by_response_conditions_with_header(http_filter, resp_conditions, response_header) {
         return None;
     }
     Some(http_filter)
@@ -138,10 +138,20 @@ pub(super) fn skip_by_response_conditions(
     resp_conditions: &[praxis_core::config::ResponseCondition],
     ctx: &HttpFilterContext<'_>,
 ) -> bool {
-    if !resp_conditions.is_empty()
-        && let Some(resp) = ctx.response_header.as_ref()
-        && !should_execute_response_ref(resp_conditions, resp.status, &resp.headers)
-    {
+    let response_header = ctx.response_header.as_ref().map(|resp| &**resp);
+    skip_by_response_conditions_with_header(http_filter, resp_conditions, response_header)
+}
+
+/// Returns `true` if response conditions fail against the provided header.
+pub(super) fn skip_by_response_conditions_with_header(
+    http_filter: &dyn crate::filter::HttpFilter,
+    resp_conditions: &[praxis_core::config::ResponseCondition],
+    response_header: Option<&Response>,
+) -> bool {
+    let Some(resp) = response_header else {
+        return false;
+    };
+    if !resp_conditions.is_empty() && !should_execute_response_ref(resp_conditions, resp.status, &resp.headers) {
         trace!(filter = http_filter.name(), "skipped by response conditions");
         return true;
     }

@@ -175,6 +175,29 @@ impl FilterPipeline {
         body: &mut Option<Bytes>,
         end_of_stream: bool,
     ) -> Result<FilterAction, FilterError> {
+        let response_header = ctx.response_header.as_ref().map(|resp| crate::context::Response {
+            headers: resp.headers.clone(),
+            status: resp.status,
+        });
+        self.execute_http_response_body_with_response_header(ctx, body, end_of_stream, response_header.as_ref())
+    }
+
+    /// Run all HTTP response body filters in reverse order.
+    ///
+    /// Uses `response_header` to evaluate `response_conditions`
+    /// after the protocol layer has left the response-header phase.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FilterError`] if any body filter fails.
+    #[expect(clippy::indexing_slicing, reason = "idx bounded by filters.len()")]
+    pub fn execute_http_response_body_with_response_header(
+        &self,
+        ctx: &mut HttpFilterContext<'_>,
+        body: &mut Option<Bytes>,
+        end_of_stream: bool,
+        response_header: Option<&crate::context::Response>,
+    ) -> Result<FilterAction, FilterError> {
         ensure_body_done_indices(ctx, self.filters.len());
         accumulate_body_bytes(&mut ctx.response_body_bytes, body);
         let mut released = false;
@@ -183,7 +206,8 @@ impl FilterPipeline {
                 trace!(filter = pf.filter.name(), "skipped body (body_done)");
                 continue;
             }
-            let Some(http_filter) = as_response_body_filter(&pf.filter, &pf.response_conditions, ctx) else {
+            let Some(http_filter) = as_response_body_filter(&pf.filter, &pf.response_conditions, response_header)
+            else {
                 continue;
             };
             ctx.current_filter_id = Some(pf.filter_id);
