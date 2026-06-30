@@ -301,10 +301,7 @@ mod tests {
                 "response_body"
             }
 
-            async fn on_request(
-                &self,
-                _ctx: &mut crate::HttpFilterContext<'_>,
-            ) -> Result<FilterAction, FilterError> {
+            async fn on_request(&self, _ctx: &mut crate::HttpFilterContext<'_>) -> Result<FilterAction, FilterError> {
                 Ok(FilterAction::Continue)
             }
 
