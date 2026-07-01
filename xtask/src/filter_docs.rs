@@ -1361,9 +1361,9 @@ fn render_type_path(tp: &syn::TypePath, enums: &BTreeMap<String, EnumInfo>) -> S
         "String" => "string".to_owned(),
         "SecretString" => "string (secret)".to_owned(),
         "Value" => "any".to_owned(),
-        "bool" | "u8" | "u16" | "u32" | "u64" | "usize" | "i8" | "i16" | "i32" | "i64" | "isize" | "f32" | "f64" => {
-            ident
-        },
+        "bool" => ident,
+        "u8" | "u16" | "u32" | "u64" | "usize" | "i8" | "i16" | "i32" | "i64" | "isize" => "integer".to_owned(),
+        "f32" | "f64" => "number".to_owned(),
         other => enums
             .get(other)
             .map_or_else(|| other.to_owned(), |info| render_enum_type(info, enums)),
