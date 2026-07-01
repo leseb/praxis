@@ -343,6 +343,33 @@ fn response_body_condition_when_no_match_skips_filter_with_ctx_header() {
     );
 }
 
+#[test]
+fn response_body_condition_when_match_executes_filter_with_ctx_header() {
+    let chunks = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let pipeline = make_pipeline_with_response_conditions(vec![(
+        Box::new(ResponseBodyInspectorFilter {
+            chunks: Arc::clone(&chunks),
+        }),
+        vec![when_status(&[200])],
+    )]);
+    let req = crate::test_utils::make_request(Method::GET, "/");
+    let mut resp = crate::context::Response {
+        status: StatusCode::OK,
+        headers: HeaderMap::new(),
+    };
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    ctx.response_header = Some(&mut resp);
+
+    let mut body = Some(Bytes::from_static(b"response data"));
+    let _result = pipeline.execute_http_response_body(&mut ctx, &mut body, true).unwrap();
+
+    assert_eq!(
+        chunks.lock().unwrap().len(),
+        1,
+        "response body filter should execute when ctx response status matches"
+    );
+}
+
 #[tokio::test]
 async fn no_conditions_always_executes() {
     let counter = Arc::new(AtomicUsize::new(0));
