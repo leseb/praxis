@@ -34,7 +34,6 @@ use crate::pipelines::resolve_pipelines;
 #[expect(
     clippy::too_many_arguments,
     clippy::too_many_lines,
-    clippy::cognitive_complexity,
     reason = "orchestration function"
 )]
 pub(crate) fn reload_pipelines(
@@ -145,7 +144,6 @@ fn log_restart_required_changes(old: &Config, new: &Config) {
 }
 
 /// Detect listener additions, removals, and address rebinds.
-#[expect(clippy::cognitive_complexity, reason = "pre-existing complexity above threshold")]
 fn detect_listener_topology_changes(old: &Config, new: &Config) {
     let old_names: std::collections::HashSet<&str> = old.listeners.iter().map(|l| l.name.as_str()).collect();
     let new_names: std::collections::HashSet<&str> = new.listeners.iter().map(|l| l.name.as_str()).collect();
@@ -260,18 +258,35 @@ fn detect_tls_toggles(old: &Config, new: &Config) {
 /// Log a warning when the new config contains stateful filters
 /// whose state will reset on reload (e.g. rate limiters).
 fn warn_stateful_filter_reset(config: &Config) {
-    let has_rate_limiter = config.filter_chains.iter().any(|c| {
-        c.filters
-            .iter()
-            .any(|f| f.filter_type == "rate_limit" || f.filter_type == "circuit_breaker")
-    });
+    let has_stateful = config
+        .filter_chains
+        .iter()
+        .any(|c| c.filters.iter().any(is_stateful_recursive));
 
-    if has_rate_limiter {
+    if has_stateful {
         warn!(
             "stateful filters (rate_limit, circuit_breaker) have been \
              reset; in-flight requests retain old state via Arc guard"
         );
     }
+}
+
+/// Check a filter entry and its inline branch chain filters.
+fn is_stateful_recursive(f: &praxis_core::config::FilterEntry) -> bool {
+    if f.filter_type == "rate_limit" || f.filter_type == "circuit_breaker" {
+        return true;
+    }
+    f.branch_chains.as_ref().is_some_and(|branches| {
+        branches.iter().any(|b| {
+            b.chains.iter().any(|chain_ref| {
+                if let praxis_core::config::ChainRef::Inline { filters, .. } = chain_ref {
+                    filters.iter().any(is_stateful_recursive)
+                } else {
+                    false
+                }
+            })
+        })
+    })
 }
 
 // -----------------------------------------------------------------------------

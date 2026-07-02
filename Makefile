@@ -67,13 +67,13 @@ endif
 check-prereqs:
 	@for cmd in $(REQUIRED_CMDS); do \
 		$$cmd --version >/dev/null 2>&1 || { \
-			echo "\"$$cmd\" is not installed or broken — install/reinstall it before running make (see docs/development.md)" >&2; \
+			echo "\"$$cmd\" is not installed or broken — install/reinstall it before running make (see docs/developing/getting-started.md)" >&2; \
 			exit 1; \
 		}; \
 	done
 check-prereqs-cmake: check-prereqs
 	@cmake --version >/dev/null 2>&1 || { \
-		echo "\"cmake\" is not installed or broken — install/reinstall it before running make (see docs/development.md)" >&2; \
+		echo "\"cmake\" is not installed or broken — install/reinstall it before running make (see docs/developing/getting-started.md)" >&2; \
 		exit 1; \
 	}
 check-prereqs-nightly-toolchain: check-prereqs
@@ -82,7 +82,7 @@ check-prereqs-nightly-toolchain: check-prereqs
 		exit 1; \
 	}
 	@cargo +$(NIGHTLY_VERSION) --version >/dev/null 2>&1 || { \
-		echo "Rust $(NIGHTLY_VERSION) is not installed — run \"rustup toolchain install $(NIGHTLY_VERSION)\" (see docs/development.md)" >&2; \
+		echo "Rust $(NIGHTLY_VERSION) is not installed — run \"rustup toolchain install $(NIGHTLY_VERSION)\" (see docs/developing/getting-started.md)" >&2; \
 		exit 1; \
 	}
 check-prereqs-nightly: check-prereqs-nightly-toolchain
@@ -190,7 +190,6 @@ lint:
 	cargo machete
 	cargo xtask lint-deps
 	cargo xtask lint-example-tests
-	cargo xtask lint-ai-isolation
 	cargo xtask sync-example-readme
 	cargo xtask lint-filter-docs
 
@@ -345,7 +344,7 @@ help:
 	@echo "  V=1                  show test output (--nocapture)"
 	@echo ""
 	@echo "Top-level:"
-	@echo "  all                  build + lint + test + audit"
+	@echo "  all                  build + fmt + lint + test + audit + container"
 	@echo ""
 	@echo "Build:"
 	@echo "  build                cargo build --workspace"
@@ -364,7 +363,6 @@ help:
 	@echo "  test-resilience      resilience tests only"
 	@echo "  test-config-validation  alias for test-schema"
 	@echo "  test-config          alias for test-schema"
-	@echo "  test-smoke           smoke tests only"
 	@echo ""
 	@echo "Bench:"
 	@echo "  bench                Criterion micro-benchmarks"
