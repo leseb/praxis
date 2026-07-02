@@ -74,8 +74,7 @@ server -> protocol -> filter -> core -> tls
 - **proto** (`praxis-proto`): vendored Envoy ext_proc
   protobuf definitions
 - **ext-proc** (`praxis-ext-proc`): Envoy ext_proc
-  filter (anti-pattern; opt-in `ext-proc` feature,
-  default-on for migration compatibility)
+  filter (anti-pattern; opt-in `ext-proc` feature)
 
 **Test crates** (under `tests/`):
 
