@@ -259,7 +259,7 @@ sequenceDiagram
     participant LP as ListenerPipelines
     participant S as PingoraServerRuntime
 
-    M->>C: Config::load(path, fallback_yaml)
+    M->>C: load_config(explicit_path)
     C->>C: serde_yaml → Config{listeners, filter_chains, clusters}
     C->>C: validate() (listeners, chains, clusters)
     M->>M: init_tracing(&config)
