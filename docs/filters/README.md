@@ -135,12 +135,12 @@ builtins/
   http/                       HTTP protocol filters
     observability/            Access logs, request IDs
     payload_processing/       Compression, body field extraction, JSON-RPC
-    security/                 CORS, CSRF, forwarded headers, guardrails, IP ACL
-    traffic_management/       Router, load balancer, timeout, rate limit, redirect, static response
+    security/                 CORS, credential injection, CSRF, forwarded headers, guardrails, IP ACL, policy
+    traffic_management/       Circuit breaker, gRPC detection, router, load balancer, timeout, rate limit, redirect, static response
     transformation/           Header, path rewrite, URL rewrite
   tcp/                        TCP protocol filters
     observability/            Connection logging
-    traffic_management/       SNI-based routing
+    traffic_management/       SNI router, TCP load balancer
 ```
 
 At runtime, pipeline execution dispatches to the correct
