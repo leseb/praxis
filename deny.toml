@@ -49,6 +49,10 @@ skip = [
 # entire subtree rather than listing each one.
 skip-tree = [
     { crate = "quixotic-plecostomus-core@0.8", reason = "pingora fork subtree: older dashmap/rand/syn/indexmap/hashbrown plus the x509-parser -> thiserror 1 duplicate" },
+    # The fork's cache sits outside the core subtree above; it pulls
+    # blake2 -> the RustCrypto digest 0.10 line (digest, block-buffer,
+    # crypto-common), duplicating the digest 0.11 our sha2 uses.
+    { crate = "quixotic-plecostomus-cache@0.8", reason = "pingora fork cache pulls blake2 -> digest 0.10 (block-buffer, crypto-common)" },
 ]
 
 [sources]
