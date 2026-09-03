@@ -92,6 +92,20 @@ organizations that underpin most of async Rust.
 maintained by the rustls project and the RustCrypto
 organization.
 
+`secrecy` wraps the credentials held by the
+`credential_injection` filter so they are not
+accidentally logged and are zeroized on drop. It is
+maintained by Tony Arcieri (iqlusion), author of
+`zeroize` and much of the RustCrypto stack,
+dual-licensed Apache-2.0 OR MIT, and is the
+ecosystem's de-facto secret wrapper (~37M recent
+downloads). It is a single-maintainer crate whose
+last release was 2024-10-09; for a small,
+feature-complete primitive this is low risk. Should
+it go dormant, the exit is to vendor its narrow
+surface: it is a thin wrapper over `zeroize`,
+already a direct dependency.
+
 ### Observability
 
 `metrics`, `metrics-exporter-prometheus`
