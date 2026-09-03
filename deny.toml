@@ -38,19 +38,17 @@ highlight = "all"
 # each direct dependency. Re-evaluate on each Pingora
 # fork sync.
 skip = [
-    # metrics-util + tungstenite pin rand 0.9
-    { crate = "rand@0.9", reason = "metrics + tungstenite transitive" },
-
-    # x509-parser ecosystem hasn't migrated to thiserror 2
-    { crate = "thiserror@1", reason = "x509-parser transitive" },
-    { crate = "thiserror-impl@1", reason = "follows thiserror 1" },
-
+    # rand 0.9 is pinned by metrics-util, opentelemetry_sdk, and
+    # proptest (tests); all lag behind our rand 0.10.
+    # thiserror 1 (via the x509-parser stack) is covered by the
+    # Pingora fork skip-tree below, not listed here.
+    { crate = "rand@0.9", reason = "metrics-util + opentelemetry_sdk + proptest" },
 ]
 
 # Pingora fork pulls many older deps; suppress the
 # entire subtree rather than listing each one.
 skip-tree = [
-    { crate = "quixotic-plecostomus-core@0.8", reason = "pingora fork pins older dashmap, rand, syn, indexmap, hashbrown" },
+    { crate = "quixotic-plecostomus-core@0.8", reason = "pingora fork subtree: older dashmap/rand/syn/indexmap/hashbrown plus the x509-parser -> thiserror 1 duplicate" },
 ]
 
 [sources]
