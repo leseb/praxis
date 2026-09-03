@@ -39,8 +39,11 @@ them on every pull request.
   requires three-component semver on every
   workspace dependency.
 
-Accepted, documented exceptions live in
-[deny.toml] with a reason each:
+Accepted, documented advisory exceptions carry a
+reason each. cargo-deny ignores live in [deny.toml];
+cargo-audit ignores live in [.cargo/audit.toml]. The
+lists overlap but are not identical (see the `lru`
+note below):
 
 - `RUSTSEC-2024-0388` (`derivative`, unmaintained):
   transitive via the Pingora fork.
@@ -49,11 +52,15 @@ Accepted, documented exceptions live in
   `pingora-rustls` only; `praxis-tls` migrated to
   the `rustls::pki_types` PEM iterators.
 - `RUSTSEC-2026-0253` (`lru`, unsound `pop()` panic
-  safety): transitive; tracked until a fixed
-  release is available.
+  safety): transitive via the Pingora fork. Ignored
+  only in [.cargo/audit.toml]; `deny.toml`'s
+  `unmaintained = "all"` does not gate `unsound`
+  advisories, so a cargo-deny ignore would be
+  unused. Tracked until a fixed release is available.
 
 [RustSec advisory database]: https://rustsec.org/
 [deny.toml]: ../../deny.toml
+[.cargo/audit.toml]: ../../.cargo/audit.toml
 
 ## Direct Dependency Review
 
