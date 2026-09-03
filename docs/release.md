@@ -41,20 +41,29 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Pushing the tag runs the release pipeline
-(`.github/workflows/release.yaml`):
+The release runs in two phases
+(`.github/workflows/release.yaml`).
+
+Phase 1 runs on the tag push:
 
 1. Validate the tag against the workspace version
-2. Run the full test suite
+2. Run the full test suite (skipped when the commit is
+   already green on main)
 3. Verify every release crate packages cleanly
    (publish dry run)
 4. Build and publish the container image to GHCR
-5. Create the GitHub release with generated notes
+5. Cut a draft pre-release with generated notes
 
-Publishing to crates.io stays a manual step: the
-pipeline stops at the dry run. Run `cargo publish` per
-crate, in dependency order, once the release is tagged
-and green.
+Phase 2 runs when a maintainer publishes the draft:
+
+6. Publish every release crate to crates.io, in
+   dependency order
+
+Review and edit the draft notes, then publish the
+release from the GitHub UI. Publishing performs the real
+crates.io publish using the `RUST_CRATES_PUBLISH_TOKEN`
+secret; nothing reaches crates.io until you publish the
+release.
 
 ## Publishing Container Images
 
