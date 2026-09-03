@@ -2,8 +2,6 @@
 unmaintained = "all"
 maximum-db-staleness = "P30D"
 ignore = [
-    # derivative 2.2.0: unmaintained (pingora transitive)
-    "RUSTSEC-2024-0388",
     # rustls-pemfile 2.2.0: unmaintained (transitive via pingora fork)
     "RUSTSEC-2025-0134",
     # NOTE: the unsound `lru` advisory RUSTSEC-2026-0253 is not listed
@@ -33,26 +31,13 @@ wildcards = "deny"
 allow-wildcard-paths = true
 highlight = "all"
 
-# Suppress known-unfixable duplicate version warnings.
-# All are transitive: Praxis uses the latest version of
-# each direct dependency. Re-evaluate on each Pingora
-# fork sync.
-skip = [
-    # rand 0.9 is pinned by metrics-util, opentelemetry_sdk, and
-    # proptest (tests); all lag behind our rand 0.10.
-    # thiserror 1 (via the x509-parser stack) is covered by the
-    # Pingora fork skip-tree below, not listed here.
-    { crate = "rand@0.9", reason = "metrics-util + opentelemetry_sdk + proptest" },
-]
-
-# Pingora fork pulls many older deps; suppress the
-# entire subtree rather than listing each one.
+# The remaining duplicate versions are transitive and known-unfixable:
+# the Pingora fork's large subtree pulls its own versions of some common
+# crates (syn, hashbrown, getrandom, ...) that differ from praxis's other
+# transitive deps. Suppress the whole fork subtree rather than tracking
+# each ecosystem-wide duplicate. Re-evaluate on each Pingora fork sync.
 skip-tree = [
-    { crate = "quixotic-plecostomus-core@0.8", reason = "pingora fork subtree: older dashmap/rand/syn/indexmap/hashbrown plus the x509-parser -> thiserror 1 duplicate" },
-    # The fork's cache sits outside the core subtree above; it pulls
-    # blake2 -> the RustCrypto digest 0.10 line (digest, block-buffer,
-    # crypto-common), duplicating the digest 0.11 our sha2 uses.
-    { crate = "quixotic-plecostomus-cache@0.8", reason = "pingora fork cache pulls blake2 -> digest 0.10 (block-buffer, crypto-common)" },
+    { crate = "quixotic-plecostomus-core@0.8", reason = "pingora fork transitive subtree pulls older shared crates than praxis" },
 ]
 
 [sources]

@@ -45,8 +45,6 @@ cargo-audit ignores live in [.cargo/audit.toml]. The
 lists overlap but are not identical (see the `lru`
 note below):
 
-- `RUSTSEC-2024-0388` (`derivative`, unmaintained):
-  transitive via the Pingora fork.
 - `RUSTSEC-2025-0134` (`rustls-pemfile`,
   unmaintained): transitive via the Pingora fork's
   `pingora-rustls` only; `praxis-tls` migrated to

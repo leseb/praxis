@@ -51,3 +51,8 @@ docs/**/
 
 # Praxis config files
 praxis.yaml
+
+# Personal TODO lists
+TODO
+TODO.md
+TODO.txt
