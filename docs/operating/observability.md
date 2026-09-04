@@ -231,6 +231,25 @@ overload checks pass. Use with
 `praxis_connections_active` to derive connection
 rates and concurrency.
 
+#### `praxis_tcp_bytes_sent_total` / `praxis_tcp_bytes_received_total` (counters)
+
+Bytes forwarded over TCP connections, from the
+proxy's point of view: `received` is the
+client-to-upstream direction, `sent` is
+upstream-to-client.
+
+| Label | Values |
+| ---------- | ---------------------------------------- |
+| `listener` | Listener name from config |
+
+Recorded once per connection after forwarding ends.
+Counts are accumulated as the copy progresses rather
+than read from its return value, so a session ended
+by an idle timeout, a server shutdown, or the
+`max_duration` force-close still reports the bytes it
+actually forwarded. Peeked TLS `ClientHello` bytes
+are included in `received`.
+
 #### `praxis_tcp_active_connections` (gauge)
 
 TCP connections currently open, incremented on accept

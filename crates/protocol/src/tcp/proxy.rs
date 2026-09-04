@@ -3,7 +3,19 @@
 
 //! Pingora-backed bidirectional TCP proxy application.
 
-use std::{borrow::Cow, collections::HashMap, io, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    io,
+    net::SocketAddr,
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -12,7 +24,7 @@ use praxis_core::connectivity::is_private_ip;
 use praxis_filter::{FilterAction, FilterPipeline, TcpFilterContext};
 use praxis_tls::sni;
 use tokio::{
-    io::AsyncReadExt as _,
+    io::{AsyncRead, AsyncReadExt as _, AsyncWrite, ReadBuf},
     net::TcpStream,
     sync::{Semaphore, watch},
 };
@@ -146,33 +158,44 @@ impl PingoraTcpProxy {
             })
     }
 
-    /// Run bidirectional forwarding, returning `(bytes_in, bytes_out, reason)`.
+    /// Run bidirectional forwarding, returning the close reason.
     ///
-    /// The byte counts are exact only on a clean close (`Completed`); a
-    /// cancelled `copy_bidirectional` (shutdown, idle timeout, or max-duration
-    /// force-close) cannot report its partial progress, so those reasons carry
-    /// zero counts. The reason lets the `connection_close` log distinguish a
-    /// force-close from a genuine completion.
+    /// Byte counts are accumulated into `counters` as the copy progresses,
+    /// so they remain exact when `copy_bidirectional` is cancelled by a
+    /// shutdown, idle timeout, or max-duration force-close, which are
+    /// exactly the long-lived sessions whose throughput matters most. The
+    /// reason lets the
+    /// `connection_close` log distinguish a force-close from a genuine
+    /// completion.
+    #[expect(clippy::too_many_arguments, reason = "per-connection forwarding state")]
     async fn forward(
         &self,
         session: &mut Stream,
         upstream: &mut TcpStream,
         shutdown_rx: &mut watch::Receiver<bool>,
         upstream_addr: &str,
-    ) -> (u64, u64, TcpCloseReason) {
-        self.forward_inner(session, upstream, shutdown_rx, upstream_addr).await
+        counters: &ByteCounters,
+    ) -> TcpCloseReason {
+        self.forward_inner(session, upstream, shutdown_rx, upstream_addr, counters)
+            .await
     }
 
     /// Inner forwarding logic, optionally wrapped in a max-duration timeout.
+    #[expect(clippy::too_many_arguments, reason = "per-connection forwarding state")]
     async fn forward_inner(
         &self,
         session: &mut Stream,
         upstream: &mut TcpStream,
         shutdown_rx: &mut watch::Receiver<bool>,
         upstream_addr: &str,
-    ) -> (u64, u64, TcpCloseReason) {
+        counters: &ByteCounters,
+    ) -> TcpCloseReason {
+        let mut counted = CountingStream {
+            inner: session,
+            counters,
+        };
         let copy_fut = async {
-            let copy_future = tokio::io::copy_bidirectional(session, upstream);
+            let copy_future = tokio::io::copy_bidirectional(&mut counted, upstream);
             match self.session_timeout {
                 Some(timeout) => forward_with_timeout(copy_future, shutdown_rx, timeout, upstream_addr).await,
                 // Config validation applies a default session timeout to every
@@ -191,7 +214,7 @@ impl PingoraTcpProxy {
                     max_duration_secs = max_dur.as_secs(),
                     "TCP session exceeded maximum duration"
                 );
-                (0, 0, TcpCloseReason::MaxDuration)
+                TcpCloseReason::MaxDuration
             }
         } else {
             copy_fut.await
@@ -428,9 +451,11 @@ impl ServerApp for PingoraTcpProxy {
             drop(peeked_bytes);
 
             let mut shutdown_rx: watch::Receiver<bool> = shutdown.clone();
-            let (copied_in, bytes_out, close_reason) = self
-                .forward(&mut session, &mut upstream, &mut shutdown_rx, &upstream_addr)
+            let counters = ByteCounters::default();
+            let close_reason = self
+                .forward(&mut session, &mut upstream, &mut shutdown_rx, &upstream_addr, &counters)
                 .await;
+            let (copied_in, bytes_out) = counters.totals();
             // The peeked ClientHello bytes were read from the client and
             // written to the upstream before copy_bidirectional started, so
             // they are client->upstream ingress and belong in bytes_in.
@@ -458,8 +483,10 @@ impl ServerApp for PingoraTcpProxy {
                 reason = close_reason.as_str(),
                 "connection_close"
             );
+            let listener_label = self.listener_label_for(&local_addr);
+            super::metrics::record_tcp_bytes(listener_label.clone(), bytes_in, bytes_out);
             super::metrics::record_tcp_connection_duration(
-                self.listener_label_for(&local_addr),
+                listener_label,
                 close_reason.as_str(),
                 connect_time.elapsed().as_secs_f64(),
             );
@@ -724,20 +751,20 @@ async fn forward_with_timeout<F: Future<Output = io::Result<(u64, u64)>>>(
     shutdown_rx: &mut watch::Receiver<bool>,
     timeout: Duration,
     upstream_addr: &str,
-) -> (u64, u64, TcpCloseReason) {
+) -> TcpCloseReason {
     tokio::select! {
         biased;
-        _ = shutdown_rx.changed() => (0, 0, TcpCloseReason::Shutdown),
+        _ = shutdown_rx.changed() => TcpCloseReason::Shutdown,
         r = tokio::time::timeout(timeout, copy_future) => match r {
-            Ok(Ok((c2s, s2c))) => (c2s, s2c, TcpCloseReason::Completed),
+            Ok(Ok(_)) => TcpCloseReason::Completed,
             Ok(Err(e)) => {
                 warn!(upstream = %upstream_addr, error = %e, phase = "forward", "connection_error");
-                (0, 0, TcpCloseReason::Error)
+                TcpCloseReason::Error
             },
             Err(_) => {
                 let timeout_ms = u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX);
                 warn!(upstream = %upstream_addr, timeout_ms, "TCP session timed out");
-                (0, 0, TcpCloseReason::SessionTimeout)
+                TcpCloseReason::SessionTimeout
             },
         },
     }
@@ -748,17 +775,87 @@ async fn forward_no_timeout<F: Future<Output = io::Result<(u64, u64)>>>(
     copy_future: F,
     shutdown_rx: &mut watch::Receiver<bool>,
     upstream_addr: &str,
-) -> (u64, u64, TcpCloseReason) {
+) -> TcpCloseReason {
     tokio::select! {
         biased;
-        _ = shutdown_rx.changed() => (0, 0, TcpCloseReason::Shutdown),
+        _ = shutdown_rx.changed() => TcpCloseReason::Shutdown,
         r = copy_future => match r {
-            Ok((c2s, s2c)) => (c2s, s2c, TcpCloseReason::Completed),
+            Ok(_) => TcpCloseReason::Completed,
             Err(e) => {
                 warn!(upstream = %upstream_addr, error = %e, phase = "forward", "connection_error");
-                (0, 0, TcpCloseReason::Error)
+                TcpCloseReason::Error
             },
         },
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Byte Accounting
+// -----------------------------------------------------------------------------
+
+/// Bytes forwarded in each direction, accumulated as the copy progresses.
+///
+/// `copy_bidirectional` only reports its totals on a clean return, so a
+/// cancelled session (shutdown, idle timeout, max-duration force-close)
+/// would otherwise report zero for exactly the long-lived sessions whose
+/// throughput matters most. Counting inside the stream adapter keeps the
+/// totals exact on every close path.
+#[derive(Debug, Default)]
+struct ByteCounters {
+    /// Bytes read from the downstream client (client to upstream).
+    received: AtomicU64,
+
+    /// Bytes written to the downstream client (upstream to client).
+    sent: AtomicU64,
+}
+
+impl ByteCounters {
+    /// Current `(received, sent)` totals.
+    fn totals(&self) -> (u64, u64) {
+        (self.received.load(Ordering::Relaxed), self.sent.load(Ordering::Relaxed))
+    }
+}
+
+/// Downstream stream wrapper that tallies bytes as they pass through.
+///
+/// Wrapping only the client side is sufficient: bytes read from the client
+/// are the client-to-upstream direction and bytes written to the client are
+/// the upstream-to-client direction.
+struct CountingStream<'a> {
+    /// The wrapped downstream session.
+    inner: &'a mut Stream,
+
+    /// Shared totals updated on every successful poll.
+    counters: &'a ByteCounters,
+}
+
+impl AsyncRead for CountingStream<'_> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        let before = buf.filled().len();
+        let poll = Pin::new(&mut *self.inner).poll_read(cx, buf);
+        if poll.is_ready() {
+            let read = buf.filled().len().saturating_sub(before);
+            self.counters.received.fetch_add(read as u64, Ordering::Relaxed);
+        }
+        poll
+    }
+}
+
+impl AsyncWrite for CountingStream<'_> {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+        let poll = Pin::new(&mut *self.inner).poll_write(cx, buf);
+        if let Poll::Ready(Ok(written)) = &poll {
+            self.counters.sent.fetch_add(*written as u64, Ordering::Relaxed);
+        }
+        poll
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut *self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut *self.inner).poll_shutdown(cx)
     }
 }
 
@@ -886,37 +983,28 @@ fn ports_by_listener(names: &HashMap<String, ::metrics::SharedString>) -> HashMa
     reason = "tests"
 )]
 mod tests {
-    use std::sync::{
-        Mutex,
-        atomic::{AtomicUsize, Ordering},
-    };
+    use std::sync::{Mutex, atomic::AtomicUsize};
 
     use tracing_subscriber::layer::SubscriberExt as _;
 
     use super::*;
 
     #[tokio::test]
-    async fn forward_completed_returns_bytes_and_completed_reason() {
+    async fn forward_completed_returns_completed_reason() {
         let (_tx, mut rx) = watch::channel(false);
-        let (c2s, s2c, reason) = forward_no_timeout(async { Ok((5_u64, 7_u64)) }, &mut rx, "10.0.0.1:5432").await;
-        assert_eq!(
-            (c2s, s2c),
-            (5, 7),
-            "clean completion must report the copied byte counts"
-        );
+        let reason = forward_no_timeout(async { Ok((5_u64, 7_u64)) }, &mut rx, "10.0.0.1:5432").await;
         assert_eq!(reason, TcpCloseReason::Completed, "clean completion is 'completed'");
     }
 
     #[tokio::test]
     async fn forward_error_returns_error_reason() {
         let (_tx, mut rx) = watch::channel(false);
-        let (c2s, s2c, reason) = forward_no_timeout(
+        let reason = forward_no_timeout(
             async { Err(io::Error::new(io::ErrorKind::ConnectionReset, "reset")) },
             &mut rx,
             "10.0.0.1:5432",
         )
         .await;
-        assert_eq!((c2s, s2c), (0, 0), "an errored copy cannot report counts");
         assert_eq!(
             reason,
             TcpCloseReason::Error,
@@ -928,13 +1016,12 @@ mod tests {
     async fn forward_shutdown_returns_shutdown_reason() {
         let (tx, mut rx) = watch::channel(false);
         tx.send(true).expect("send shutdown");
-        let (c2s, s2c, reason) = forward_no_timeout(
+        let reason = forward_no_timeout(
             std::future::pending::<io::Result<(u64, u64)>>(),
             &mut rx,
             "10.0.0.1:5432",
         )
         .await;
-        assert_eq!((c2s, s2c), (0, 0), "a shutdown-cancelled copy cannot report counts");
         assert_eq!(
             reason,
             TcpCloseReason::Shutdown,
@@ -945,18 +1032,68 @@ mod tests {
     #[tokio::test]
     async fn forward_idle_timeout_returns_session_timeout_reason() {
         let (_tx, mut rx) = watch::channel(false);
-        let (c2s, s2c, reason) = forward_with_timeout(
+        let reason = forward_with_timeout(
             std::future::pending::<io::Result<(u64, u64)>>(),
             &mut rx,
             Duration::from_millis(5),
             "10.0.0.1:5432",
         )
         .await;
-        assert_eq!((c2s, s2c), (0, 0), "a timed-out copy cannot report counts");
         assert_eq!(
             reason,
             TcpCloseReason::SessionTimeout,
             "an idle-timeout close must not be logged as 'completed'"
+        );
+    }
+
+    #[tokio::test]
+    async fn counting_stream_tallies_both_directions() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let counters = ByteCounters::default();
+        let (client, mut peer) = tokio::io::duplex(64);
+        let mut stream: Stream = Box::new(client);
+        let mut counted = CountingStream {
+            inner: &mut stream,
+            counters: &counters,
+        };
+
+        peer.write_all(b"12345").await.expect("peer write");
+        let mut buf = [0_u8; 5];
+        counted.read_exact(&mut buf).await.expect("counted read");
+        counted.write_all(b"abc").await.expect("counted write");
+        peer.read_exact(&mut [0_u8; 3]).await.expect("peer read");
+
+        assert_eq!(
+            counters.totals(),
+            (5, 3),
+            "reads from the client count as received and writes to it as sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn byte_counters_survive_a_cancelled_copy() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+        let counters = ByteCounters::default();
+        let (client, mut peer) = tokio::io::duplex(64);
+        let mut stream: Stream = Box::new(client);
+        let mut counted = CountingStream {
+            inner: &mut stream,
+            counters: &counters,
+        };
+
+        peer.write_all(b"partial").await.expect("peer write");
+        let mut buf = [0_u8; 7];
+        counted.read_exact(&mut buf).await.expect("counted read");
+
+        let cancelled = tokio::time::timeout(Duration::from_millis(5), counted.read_u8()).await;
+        assert!(cancelled.is_err(), "the read should time out with nothing further sent");
+        assert_eq!(
+            counters.totals().0,
+            7,
+            "bytes already forwarded must survive a cancelled copy; reporting zero here is the \
+             regression these counters exist to prevent"
         );
     }
 

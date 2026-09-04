@@ -17,6 +17,12 @@ const TCP_CONNECTIONS_TOTAL: &str = "praxis_tcp_connections_total";
 /// Histogram for TCP connection duration in seconds.
 const TCP_CONNECTION_DURATION_SECONDS: &str = "praxis_tcp_connection_duration_seconds";
 
+/// Counter for bytes written to downstream TCP clients.
+const TCP_BYTES_SENT_TOTAL: &str = "praxis_tcp_bytes_sent_total";
+
+/// Counter for bytes read from downstream TCP clients.
+const TCP_BYTES_RECEIVED_TOTAL: &str = "praxis_tcp_bytes_received_total";
+
 /// Gauge for currently open TCP connections per listener.
 ///
 /// Unlike `praxis_connections_active`, which counts HTTP requests and TCP
@@ -59,6 +65,23 @@ pub(crate) fn record_tcp_connection_duration(listener: SharedString, reason: &'s
         "reason" => reason
     )
     .record(duration_secs);
+}
+
+/// Record bytes forwarded over a closed TCP connection.
+///
+/// `received` is the client-to-upstream direction and `sent` is the
+/// upstream-to-client direction, both from the proxy's point of view.
+/// Recorded once per connection, after forwarding ends, so the totals
+/// cover cancelled sessions as well as clean closes.
+///
+/// No-op when the Prometheus recorder has not been installed
+/// (i.e. when the admin interface is disabled).
+pub(crate) fn record_tcp_bytes(listener: SharedString, received: u64, sent: u64) {
+    if !is_recorder_installed() {
+        return;
+    }
+    counter!(TCP_BYTES_RECEIVED_TOTAL, "listener" => listener.clone()).increment(received);
+    counter!(TCP_BYTES_SENT_TOTAL, "listener" => listener).increment(sent);
 }
 
 /// RAII guard that decrements `praxis_tcp_active_connections` on drop.
@@ -121,6 +144,27 @@ mod tests {
     #[test]
     fn record_large_duration_does_not_panic() {
         record_tcp_connection_duration(SharedString::const_str("long-lived"), "completed", 86400.0);
+    }
+
+    #[test]
+    fn record_bytes_without_recorder_does_not_panic() {
+        record_tcp_bytes(SharedString::const_str("test-listener"), 1, 2);
+    }
+
+    #[test]
+    fn record_bytes_accumulates_both_directions() {
+        crate::http::pingora::metrics::install_prometheus_recorder();
+        record_tcp_bytes(SharedString::const_str("bytes-listener"), 100, 250);
+        record_tcp_bytes(SharedString::const_str("bytes-listener"), 5, 7);
+        let body = crate::http::pingora::metrics::render_prometheus().expect("recorder should render");
+        assert!(
+            body.contains("praxis_tcp_bytes_received_total{listener=\"bytes-listener\"} 105"),
+            "received counter should sum both records:\n{body}"
+        );
+        assert!(
+            body.contains("praxis_tcp_bytes_sent_total{listener=\"bytes-listener\"} 257"),
+            "sent counter should sum both records:\n{body}"
+        );
     }
 
     #[test]
