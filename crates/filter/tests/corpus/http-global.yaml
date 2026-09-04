@@ -15,8 +15,8 @@
 # Production deployments swap HS256 for RS256 + JWKS and author richer CEL
 # authorization.
 
-plugin_settings:
-  routing_enabled: true
+engine_settings:
+  dispatch: policy
 
 plugins:
   - name: jwt-user
@@ -35,8 +35,7 @@ plugins:
       claim_mapper: standard
 
 global:
-  # Canonical block form: `authentication:` + `authorization:` under
-  # `global:` (no `apl:` wrapper). Legacy `apl.policy`/`identity` are rejected.
+  # Authentication and authorization are direct `global:` keys.
   authentication:
     - jwt-user
   authorization:

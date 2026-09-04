@@ -67,6 +67,14 @@ pub(crate) struct PolicyFilterConfig {
     #[serde(default = "default_max_buffer_bytes")]
     pub max_buffer_bytes: usize,
 
+    /// Allow policy-engine calls to private or loopback identity providers.
+    ///
+    /// Disabled by default to limit SSRF through policy-defined endpoints. This
+    /// does not affect Praxis upstreams, which use
+    /// `insecure_options.allow_private_endpoints`.
+    #[serde(default)]
+    pub allow_private_idp: bool,
+
     /// Fail-closed policy gate for misconfigured chains. When `true`
     /// (default), `on_request_body` rejects any request that reaches
     /// it without `mcp.method` filter-metadata. The metadata is set

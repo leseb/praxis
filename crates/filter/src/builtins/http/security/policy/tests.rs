@@ -66,6 +66,7 @@ fn agent_claims(client_id: &str) -> serde_json::Value {
 }
 
 /// Write a single-plugin policy document referencing the HS256 test secret.
+#[expect(clippy::too_many_lines, reason = "test fixture: the YAML literal is the bulk")]
 fn write_single_plugin_config() -> (TempDir, String) {
     let dir = TempDir::new().expect("create tempdir");
     let cfg_path = dir.path().join("cpex.yaml");
@@ -77,7 +78,6 @@ fn write_single_plugin_config() -> (TempDir, String) {
     hooks:
       - identity.resolve
     mode: sequential
-    priority: 10
     on_error: fail
     config:
       header: Authorization
@@ -90,6 +90,11 @@ fn write_single_plugin_config() -> (TempDir, String) {
             secret: "{TEST_SECRET}"
           leeway_seconds: 60
       claim_mapper: standard
+global:
+  # Under `dispatch: policy` a plugin runs only where a policy names it, so an
+  # identity plugin no `authentication:` list reaches fails the load.
+  authentication:
+    - jwt-user
 "#
     );
 
@@ -108,6 +113,7 @@ fn write_tool_route_config() -> (TempDir, String) {
 
 /// Variant used to prove that temporary gate results stay isolated when a
 /// pipeline contains multiple policy instances with different credentials.
+#[expect(clippy::too_many_lines, reason = "test fixture: the YAML literal is the bulk")]
 fn write_tool_route_config_for_header(header: &str) -> (TempDir, String) {
     let dir = TempDir::new().expect("create tempdir");
     let cfg_path = dir.path().join("cpex.yaml");
@@ -131,9 +137,14 @@ fn write_tool_route_config_for_header(header: &str) -> (TempDir, String) {
       claim_mapper: standard
 routes:
   - tool: echo
-    apl:
+    authorization:
       pre_invocation:
         - "require(authenticated)"
+global:
+  # Under `dispatch: policy` a plugin runs only where a policy names it, so an
+  # identity plugin no `authentication:` list reaches fails the load.
+  authentication:
+    - jwt-user
 "#
     );
     std::fs::write(&cfg_path, yaml).expect("write cpex.yaml");
@@ -170,12 +181,16 @@ fn write_http_entity_config() -> (TempDir, String) {
           leeway_seconds: 60
       claim_mapper: standard
 global:
-  apl:
-    pdp:
-      - kind: cel
+  # Under `dispatch: policy` a plugin runs only where a policy names it, so an
+  # identity plugin no `authentication:` list reaches fails the load. This is
+  # the list that reaches it.
+  authentication:
+    - jwt-user
+  pdp:
+    - kind: cel
 routes:
   - tool: echo
-    apl:
+    authorization:
       pre_invocation:
         - cel:
             expr: |
@@ -270,7 +285,7 @@ global:
     - kind: cel
 routes:
   - tool: echo
-    apl:
+    authorization:
       pre_invocation:
         - cel:
             expr: |
@@ -301,7 +316,6 @@ fn write_cel_policy_config() -> (TempDir, String) {
     hooks:
       - identity.resolve
     mode: sequential
-    priority: 10
     on_error: fail
     config:
       header: Authorization
@@ -315,12 +329,16 @@ fn write_cel_policy_config() -> (TempDir, String) {
           leeway_seconds: 60
       claim_mapper: standard
 global:
-  apl:
-    pdp:
-      - kind: cel
+  # Under `dispatch: policy` a plugin runs only where a policy names it, so an
+  # identity plugin no `authentication:` list reaches fails the load. This is
+  # the list that reaches it.
+  authentication:
+    - jwt-user
+  pdp:
+    - kind: cel
 routes:
   - tool: echo
-    apl:
+    authorization:
       pre_invocation:
         - cel:
             expr: |
@@ -380,7 +398,6 @@ fn write_taint_config() -> (TempDir, String) {
     hooks:
       - identity.resolve
     mode: sequential
-    priority: 10
     on_error: fail
     config:
       header: Authorization
@@ -395,13 +412,18 @@ fn write_taint_config() -> (TempDir, String) {
       claim_mapper: standard
 routes:
   - tool: read-secret
-    apl:
+    authorization:
       pre_invocation:
         - "taint(secret, session)"
   - tool: send-out
-    apl:
+    authorization:
       pre_invocation:
         - "security.labels contains \"secret\": deny('session accessed secret data', 'session_tainted_secret')"
+global:
+  # Under `dispatch: policy` a plugin runs only where a policy names it, so an
+  # identity plugin no `authentication:` list reaches fails the load.
+  authentication:
+    - jwt-user
 "#
     );
 
@@ -456,7 +478,6 @@ fn write_multi_source_config() -> (TempDir, String) {
     hooks:
       - identity.resolve
     mode: sequential
-    priority: 10
     on_error: fail
     config:
       header: Authorization
@@ -474,7 +495,6 @@ fn write_multi_source_config() -> (TempDir, String) {
     hooks:
       - identity.resolve
     mode: sequential
-    priority: 20
     on_error: fail
     config:
       header: X-Agent-Token
@@ -487,6 +507,12 @@ fn write_multi_source_config() -> (TempDir, String) {
             kind: secret
             secret: "{TEST_SECRET}"
       claim_mapper: standard
+global:
+  # Under `dispatch: policy` a plugin runs only where a policy names it, so an
+  # identity plugin no `authentication:` list reaches fails the load.
+  authentication:
+    - jwt-user
+    - jwt-agent
 "#
     );
 
@@ -513,16 +539,15 @@ fn write_route_scoped_identity_config() -> (TempDir, String) {
     let cfg_path = dir.path().join("cpex.yaml");
 
     let yaml = format!(
-        r#"plugin_settings:
+        r#"engine_settings:
   # Route-scoped dispatch only engages when routing is enabled.
-  routing_enabled: true
+  dispatch: policy
 plugins:
   - name: id-global
     kind: identity/jwt
     hooks:
       - identity.resolve
     mode: sequential
-    priority: 10
     on_error: fail
     config:
       header: Authorization
@@ -540,7 +565,6 @@ plugins:
     hooks:
       - identity.resolve
     mode: sequential
-    priority: 20
     on_error: fail
     config:
       header: X-Route-Token
@@ -560,7 +584,7 @@ routes:
   # `apl` is required for a route to run identity/policy at all — without
   # a policy the body phase treats the route as passthrough.
   - tool: open-tool
-    apl:
+    authorization:
       pre_invocation:
         - "require(authenticated)"
   - tool: scoped-tool
@@ -568,7 +592,7 @@ routes:
       replace_inherited: true
       steps:
         - id-route
-    apl:
+    authorization:
       pre_invocation:
         - "require(authenticated)"
 "#
@@ -750,7 +774,6 @@ fn write_valkey_session_store_config() -> (TempDir, String) {
     hooks:
       - identity.resolve
     mode: sequential
-    priority: 10
     on_error: fail
     config:
       header: Authorization
@@ -764,12 +787,17 @@ fn write_valkey_session_store_config() -> (TempDir, String) {
           leeway_seconds: 60
       claim_mapper: standard
 global:
+  # Under `dispatch: policy` a plugin runs only where a policy names it, so an
+  # identity plugin no `authentication:` list reaches fails the load. This is
+  # the list that reaches it.
+  authentication:
+    - jwt-user
   session_store:
     kind: valkey
     endpoint: localhost:6379
 routes:
   - tool: read-secret
-    apl:
+    authorization:
       pre_invocation:
         - "taint(secret, session)"
 "#
@@ -787,6 +815,7 @@ routes:
 fn build_filter(config_path: String) -> PolicyFilter {
     let cfg = PolicyFilterConfig {
         config_path,
+        allow_private_idp: false,
         body_access: super::config::BodyAccessMode::ReadOnly,
         require_protocol_metadata: true,
         init_timeout_secs: 30,
@@ -1022,6 +1051,7 @@ fn rejects_zero_max_buffer_bytes() {
     // The check runs before the config_path read, so a bogus path is fine.
     let cfg = PolicyFilterConfig {
         config_path: "/nonexistent/policy.yaml".to_owned(),
+        allow_private_idp: false,
         body_access: super::config::BodyAccessMode::ReadWrite,
         require_protocol_metadata: true,
         init_timeout_secs: 30,
@@ -1038,6 +1068,7 @@ fn rejects_zero_max_buffer_bytes() {
 fn rejects_oversized_max_buffer_bytes() {
     let cfg = PolicyFilterConfig {
         config_path: "/nonexistent/policy.yaml".to_owned(),
+        allow_private_idp: false,
         body_access: super::config::BodyAccessMode::ReadWrite,
         require_protocol_metadata: true,
         init_timeout_secs: 30,
@@ -1093,6 +1124,234 @@ fn config_requires_config_path() {
 async fn filter_constructs_from_valid_yaml() {
     let (_dir, path) = write_single_plugin_config();
     let _filter = build_filter(path);
+}
+
+/// Write a policy whose issuer uses a loopback `jwks_url`.
+fn write_jwks_url_config(capabilities: &str) -> (TempDir, String) {
+    let dir = TempDir::new().expect("create tempdir");
+    let cfg_path = dir.path().join("cpex.yaml");
+    let yaml = format!(
+        r#"plugins:
+  - name: jwt-user
+    kind: identity/jwt
+    hooks:
+      - identity.resolve
+    mode: sequential
+    on_error: fail
+{capabilities}    config:
+      header: Authorization
+      trusted_issuers:
+        - issuer: "{TEST_ISSUER}"
+          audiences: ["{TEST_AUDIENCE}"]
+          algorithms: ["RS256"]
+          decoding_key:
+            kind: jwks_url
+            url: "http://127.0.0.1:1/jwks.json"
+            insecure_http: true
+          leeway_seconds: 60
+      claim_mapper: standard
+
+global:
+  authentication:
+    - jwt-user
+"#
+    );
+    std::fs::write(&cfg_path, yaml).expect("write cpex.yaml");
+    let path_str = cfg_path.to_str().expect("utf8 path").to_owned();
+    (dir, path_str)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_jwks_issuer_constructs_with_the_installed_transport() {
+    let (_dir, path) = write_jwks_url_config("    capabilities:\n      - perform_http\n");
+    if let Err(e) = try_build_filter_allowing_private(path, true) {
+        panic!("a refused connection is recoverable and must still boot; got {e}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_jwks_issuer_without_perform_http_fails_to_construct() {
+    let (_dir, path) = write_jwks_url_config("");
+    let err = try_build_filter_allowing_private(path, true)
+        .err()
+        .expect("a withheld capability must refuse to start");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("perform_http"),
+        "the error must name the capability to add; got {msg}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_loopback_idp_policy_constructs_when_private_access_is_disabled() {
+    let (_dir, path) = write_jwks_url_config("    capabilities:\n      - perform_http\n");
+    if let Err(e) = try_build_filter_allowing_private(path, false) {
+        panic!("a refused destination is recoverable and must still boot; got {e}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_inline_key_config_needs_no_egress_capability() {
+    let (_dir, path) = write_single_plugin_config();
+    let _filter = build_filter(path);
+}
+
+/// Write a policy covering the supported request assertion shapes.
+#[expect(clippy::too_many_lines, reason = "test fixture: the YAML literal is the bulk")]
+fn write_assertions_config() -> (TempDir, String) {
+    let dir = TempDir::new().expect("create tempdir");
+    let cfg_path = dir.path().join("cpex.yaml");
+    let yaml = format!(
+        r#"plugins:
+  - name: jwt-user
+    kind: identity/jwt
+    hooks:
+      - identity.resolve
+    mode: sequential
+    on_error: fail
+    config:
+      header: Authorization
+      trusted_issuers:
+        - issuer: "{TEST_ISSUER}"
+          audiences: ["{TEST_AUDIENCE}"]
+          algorithms: ["HS256"]
+          decoding_key:
+            kind: secret
+            secret: "{TEST_SECRET}"
+          leeway_seconds: 60
+      claim_mapper: standard
+
+global:
+  authentication:
+    - jwt-user
+  assertions:
+    request:
+      headers:
+        - name: x-auth-user-id
+          from: subject.id
+        - name: x-auth-roles
+          from: subject.roles
+          encode: csv
+        - name: x-auth-context
+          members:
+            tenant: claim.tenant
+      strip:
+        - x-drop-me
+
+routes:
+  - tool: echo
+    authorization:
+      pre_invocation:
+        - "require(authenticated)"
+"#
+    );
+    std::fs::write(&cfg_path, yaml).expect("write cpex.yaml");
+    (dir, cfg_path.to_str().expect("utf8 path").to_owned())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines, reason = "linear assertion contract coverage")]
+async fn request_assertions_reach_the_upstream_request() {
+    let (_dir, path) = write_assertions_config();
+    let filter = build_filter(path);
+
+    let mut claims = standard_claims("alice");
+    claims["roles"] = json!(["admin", "writer"]);
+    claims["tenant"] = json!("acme");
+    let token = mint_jwt(&claims);
+
+    let mut req = make_request(Method::POST, "/");
+    req.headers.insert(
+        "Authorization",
+        HeaderValue::from_str(&format!("Bearer {token}")).expect("header value"),
+    );
+    req.headers.insert("x-auth-user-id", HeaderValue::from_static("root"));
+    req.headers.insert("x-drop-me", HeaderValue::from_static("secret"));
+    let mut ctx = make_filter_context(&req);
+    ctx.set_metadata("mcp.method", "tools/call");
+    ctx.set_metadata("mcp.name", "echo");
+
+    let mut body = Some(bytes::Bytes::from_static(
+        br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{}}}"#,
+    ));
+    let action = filter
+        .on_request_body(&mut ctx, &mut body, true)
+        .await
+        .expect("body phase ran");
+    assert!(
+        matches!(action, FilterAction::BodyDone),
+        "the route allows, and the body phase signals that with BodyDone; got {action:?}"
+    );
+
+    let set: std::collections::HashMap<String, String> = ctx
+        .request_headers_to_set
+        .iter()
+        .map(|(n, v)| (n.as_str().to_owned(), v.to_str().unwrap_or_default().to_owned()))
+        .collect();
+
+    assert_eq!(
+        set.get("x-auth-user-id").map(String::as_str),
+        Some("alice"),
+        "the client sent `root` under this name and must not have it forwarded: \
+         an entry removes its target before injecting"
+    );
+    assert_eq!(
+        set.get("x-auth-roles").map(String::as_str),
+        Some("admin,writer"),
+        "a collection renders under its declared encoding, sorted"
+    );
+    assert_eq!(
+        set.get("x-auth-context").map(String::as_str),
+        Some(r#"{"tenant":"acme"}"#),
+        "a members entry renders one JSON object with the operator's keys"
+    );
+
+    let removed: Vec<&str> = ctx
+        .request_headers_to_remove
+        .iter()
+        .map(http::header::HeaderName::as_str)
+        .collect();
+    assert!(
+        removed.contains(&"x-drop-me"),
+        "a `strip:` entry removes a name no header entry targets; got {removed:?}"
+    );
+    assert!(
+        !removed.contains(&"authorization"),
+        "nothing here strips the credential, and praxis must not invent removals: \
+         got {removed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_policy_without_assertions_touches_no_upstream_header() {
+    let (_dir, path) = write_tool_route_config();
+    let filter = build_filter(path);
+
+    let token = mint_jwt(&standard_claims("alice"));
+    let mut req = make_request(Method::POST, "/");
+    req.headers.insert(
+        "Authorization",
+        HeaderValue::from_str(&format!("Bearer {token}")).expect("header value"),
+    );
+    let mut ctx = make_filter_context(&req);
+    ctx.set_metadata("mcp.method", "tools/call");
+    ctx.set_metadata("mcp.name", "echo");
+
+    let mut body = Some(bytes::Bytes::from_static(
+        br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{}}}"#,
+    ));
+    drop(
+        filter
+            .on_request_body(&mut ctx, &mut body, true)
+            .await
+            .expect("body phase ran"),
+    );
+
+    assert!(
+        ctx.request_headers_to_remove.is_empty(),
+        "no contract means no removals; got {:?}",
+        ctx.request_headers_to_remove
+    );
 }
 
 /// A config selecting the Valkey session store (`global.session_store`,
@@ -1189,6 +1448,11 @@ async fn valid_hs256_jwt_continues() {
     claims["tenant"] = json!("acme");
     claims["profile"] = json!({"tier": "gold"});
     claims["authorization"] = json!("custom-value");
+    claims["projects"] = json!(["alpha", "beta"]);
+    claims["seat_count"] = json!(7);
+    claims["ratio"] = json!(1.5);
+    claims["is_admin"] = json!(true);
+    claims["absent"] = json!(null);
     let token = mint_jwt(&claims);
     let mut req = make_request(Method::POST, "/");
     req.headers.insert(
@@ -1225,6 +1489,19 @@ async fn valid_hs256_jwt_continues() {
         identity.custom_claims().get("profile").map(String::as_str),
         Some(r#"{"tier":"gold"}"#),
     );
+    for (claim, want) in [
+        ("projects", r#"["alpha","beta"]"#),
+        ("seat_count", "7"),
+        ("ratio", "1.5"),
+        ("is_admin", "true"),
+        ("absent", "null"),
+    ] {
+        assert_eq!(
+            identity.custom_claims().get(claim).map(String::as_str),
+            Some(want),
+            "claim `{claim}` must render as its compact JSON form",
+        );
+    }
     for excluded in ["iss", "aud", "sub", "exp", "iat", "roles", "teams"] {
         assert!(
             !identity.custom_claims().contains_key(excluded),
@@ -1580,6 +1857,7 @@ async fn missing_protocol_metadata_passes_when_not_required() {
     let (_dir, path) = write_tool_route_config();
     let cfg = PolicyFilterConfig {
         config_path: path,
+        allow_private_idp: false,
         body_access: super::config::BodyAccessMode::ReadOnly,
         require_protocol_metadata: false,
         init_timeout_secs: 30,
@@ -2523,6 +2801,7 @@ async fn response_phase_without_request_identity_fails_closed() {
     let (_dir, path) = write_tool_route_config();
     let cfg = PolicyFilterConfig {
         config_path: path,
+        allow_private_idp: false,
         body_access: super::config::BodyAccessMode::ReadWrite,
         require_protocol_metadata: true,
         init_timeout_secs: 30,
@@ -2765,7 +3044,8 @@ fn write_config_naming_kind(kind: &str) -> (TempDir, String) {
     let dir = TempDir::new().expect("create tempdir");
     let cfg_path = dir.path().join("cpex.yaml");
     let yaml = format!(
-        "plugins:\n  - name: host-plugin\n    kind: {kind}\n    hooks:\n      - cmf.tool_pre_invoke\n    mode: sequential\n    priority: 50\n    on_error: fail\n"
+        "plugins:\n  - name: host-plugin\n    kind: {kind}\n    hooks:\n      - cmf.tool_pre_invoke\n    mode: sequential\n    on_error: fail\n\
+         routes:\n  - tool: echo\n    authorization:\n      pre_invocation:\n        - \"run(host-plugin)\"\n"
     );
     std::fs::write(&cfg_path, yaml).expect("write cpex.yaml");
     let path_str = cfg_path.to_str().expect("utf8 path").to_owned();
@@ -2778,8 +3058,17 @@ fn parse_dom(bytes: &bytes::Bytes) -> serde_json::Value {
 }
 
 fn try_build_filter(config_path: String) -> Result<PolicyFilter, crate::FilterError> {
+    try_build_filter_allowing_private(config_path, false)
+}
+
+/// Build a filter with the configured private-destination policy.
+fn try_build_filter_allowing_private(
+    config_path: String,
+    allow_private_idp: bool,
+) -> Result<PolicyFilter, crate::FilterError> {
     PolicyFilter::new(PolicyFilterConfig {
         config_path,
+        allow_private_idp,
         body_access: super::config::BodyAccessMode::ReadOnly,
         require_protocol_metadata: true,
         init_timeout_secs: 30,
@@ -2863,5 +3152,599 @@ fn a_host_registration_replaces_a_bundled_kind() {
         builds.load(Ordering::SeqCst),
         1,
         "the host's factory must have replaced the bundled one"
+    );
+}
+
+/// Signing secret for the route-scoped identity fixture.
+const ROUTE_SECRET: &str = "praxis-cpex-route-secret-not-for-production-use";
+/// Issuer for the route-scoped identity fixture.
+const ROUTE_ISSUER: &str = "https://route-idp.test.local";
+
+/// Mint an HS256 JWT signed with [`ROUTE_SECRET`], for [`ROUTE_ISSUER`].
+fn mint_route_jwt(subject: &str) -> String {
+    let claims = json!({
+        "iss": ROUTE_ISSUER,
+        "aud": TEST_AUDIENCE,
+        "sub": subject,
+        "exp": now_unix() + 300,
+        "iat": now_unix(),
+    });
+    encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(ROUTE_SECRET.as_bytes()),
+    )
+    .expect("sign route JWT")
+}
+
+/// Return identity plugins that trust distinct global and route issuers.
+#[expect(clippy::too_many_lines, reason = "test fixture: the YAML literal is the bulk")]
+fn two_issuer_plugins() -> String {
+    format!(
+        r#"plugins:
+  - name: global-jwt
+    kind: identity/jwt
+    hooks:
+      - identity.resolve
+    on_error: fail
+    config:
+      header: Authorization
+      trusted_issuers:
+        - issuer: "{TEST_ISSUER}"
+          audiences: ["{TEST_AUDIENCE}"]
+          algorithms: ["HS256"]
+          decoding_key:
+            kind: secret
+            secret: "{TEST_SECRET}"
+          leeway_seconds: 60
+      claim_mapper: standard
+  - name: route-jwt
+    kind: identity/jwt
+    hooks:
+      - identity.resolve
+    on_error: fail
+    config:
+      header: Authorization
+      trusted_issuers:
+        - issuer: "{ROUTE_ISSUER}"
+          audiences: ["{TEST_AUDIENCE}"]
+          algorithms: ["HS256"]
+          decoding_key:
+            kind: secret
+            secret: "{ROUTE_SECRET}"
+          leeway_seconds: 60
+      claim_mapper: standard
+"#
+    )
+}
+
+/// Write an L7 policy with route-scoped authentication.
+fn write_http_route_authentication_config() -> (TempDir, String) {
+    let dir = TempDir::new().expect("create tempdir");
+    let cfg_path = dir.path().join("cpex.yaml");
+    let yaml = format!(
+        r#"{plugins}
+global:
+  authentication:
+    - global-jwt
+  authorization:
+    pre_invocation:
+      - "require(authenticated)"
+routes:
+  - http:
+      path_prefix: /v1/files
+    authentication:
+      replace_inherited: true
+      steps:
+        - route-jwt
+    authorization:
+      pre_invocation:
+        - "require(authenticated)"
+"#,
+        plugins = two_issuer_plugins()
+    );
+    std::fs::write(&cfg_path, yaml).expect("write cpex.yaml");
+    (dir, cfg_path.to_str().expect("utf8 path").to_owned())
+}
+
+/// Run L7 policy for a path and bearer token.
+async fn l7_action(filter: &PolicyFilter, path: &str, token: &str) -> FilterAction {
+    let mut req = make_request(Method::GET, path);
+    req.headers.insert(
+        "Authorization",
+        HeaderValue::from_str(&format!("Bearer {token}")).expect("header value"),
+    );
+    let mut ctx = make_filter_context(&req);
+    filter.on_request(&mut ctx).await.expect("header phase ran")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_http_route_authentication_list_governs_its_own_path() {
+    let (_dir, path) = write_http_route_authentication_config();
+    let filter = build_filter(path);
+    assert_eq!(
+        filter.derived_shape(),
+        (true, false),
+        "the fixture is the pure-L7 shape, which authorizes at the header phase",
+    );
+
+    let route_token = mint_route_jwt("alice");
+    let global_token = mint_jwt(&standard_claims("alice"));
+
+    let covered = l7_action(&filter, "/v1/files/q3.pdf", &route_token).await;
+    assert!(
+        matches!(covered, FilterAction::Continue),
+        "only the route's own list trusts this issuer, so admitting the request \
+         is what witnesses that the list ran; got {covered:?}",
+    );
+
+    let uncovered = l7_action(&filter, "/elsewhere", &route_token).await;
+    assert!(
+        matches!(uncovered, FilterAction::Reject(_)),
+        "no route covers this path, so the global list runs and does not trust \
+         the route issuer; got {uncovered:?}",
+    );
+
+    let replaced = l7_action(&filter, "/v1/files/q3.pdf", &global_token).await;
+    assert!(
+        matches!(replaced, FilterAction::Reject(_)),
+        "`replace_inherited: true` drops the global list, so a token only that \
+         list trusts must not authenticate on the route; got {replaced:?}",
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines, reason = "test fixture: the YAML literal is the bulk")]
+async fn the_early_identity_gate_honors_an_http_route_authentication_list() {
+    let dir = TempDir::new().expect("create tempdir");
+    let cfg_path = dir.path().join("cpex.yaml");
+    let yaml = format!(
+        r#"{plugins}
+global:
+  authentication:
+    - global-jwt
+routes:
+  - tool: echo
+    authorization:
+      pre_invocation:
+        - "require(authenticated)"
+  - http:
+      path_prefix: /mcp
+    authentication:
+      replace_inherited: true
+      steps:
+        - route-jwt
+"#,
+        plugins = two_issuer_plugins()
+    );
+    std::fs::write(&cfg_path, yaml).expect("write cpex.yaml");
+    let filter = build_filter(cfg_path.to_str().expect("utf8 path").to_owned());
+    assert_eq!(
+        filter.derived_shape(),
+        (false, true),
+        "the fixture is entity-routed, which takes the early-gate path",
+    );
+
+    let mut req = make_request(Method::POST, "/mcp/rpc");
+    req.headers.insert(
+        "Authorization",
+        HeaderValue::from_str(&format!("Bearer {}", mint_route_jwt("alice"))).expect("header value"),
+    );
+    let mut ctx = make_filter_context(&req);
+    let action = filter.on_request(&mut ctx).await.expect("header phase ran");
+    assert!(
+        matches!(action, FilterAction::Continue),
+        "the gate must dispatch the route's list for a path it covers; got {action:?}",
+    );
+}
+
+/// Write an assertion fixture with caller-selected header casing.
+#[expect(clippy::too_many_lines, reason = "test fixture: the YAML literal is the bulk")]
+fn write_assertions_config_named(asserted: &str) -> (TempDir, String) {
+    let dir = TempDir::new().expect("create tempdir");
+    let cfg_path = dir.path().join("cpex.yaml");
+    let yaml = format!(
+        r#"plugins:
+  - name: jwt-user
+    kind: identity/jwt
+    hooks:
+      - identity.resolve
+    on_error: fail
+    config:
+      header: Authorization
+      trusted_issuers:
+        - issuer: "{TEST_ISSUER}"
+          audiences: ["{TEST_AUDIENCE}"]
+          algorithms: ["HS256"]
+          decoding_key:
+            kind: secret
+            secret: "{TEST_SECRET}"
+          leeway_seconds: 60
+      claim_mapper: standard
+global:
+  authentication:
+    - jwt-user
+  assertions:
+    request:
+      headers:
+        - name: {asserted}
+          from: subject.id
+      strip:
+        - x-drop-me
+routes:
+  - tool: echo
+    authorization:
+      pre_invocation:
+        - "require(authenticated)"
+"#
+    );
+    std::fs::write(&cfg_path, yaml).expect("write cpex.yaml");
+    (dir, cfg_path.to_str().expect("utf8 path").to_owned())
+}
+
+/// Request header mutations queued by the policy filter.
+struct Queued {
+    set: std::collections::HashMap<String, String>,
+    removed: Vec<String>,
+    extra: Vec<(String, String)>,
+}
+
+/// Run the `echo` policy and collect upstream header mutations.
+#[expect(clippy::too_many_lines, reason = "one linear dispatch plus three queue projections")]
+async fn queued_for_echo(filter: &PolicyFilter, ctx: &mut crate::HttpFilterContext<'_>) -> Queued {
+    ctx.set_metadata("mcp.method", "tools/call");
+    ctx.set_metadata("mcp.name", "echo");
+    let mut body = Some(bytes::Bytes::from_static(
+        br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{}}}"#,
+    ));
+    let action = filter
+        .on_request_body(ctx, &mut body, true)
+        .await
+        .expect("body phase ran");
+    assert!(
+        matches!(action, FilterAction::BodyDone),
+        "the route allows, so the body phase signals BodyDone; got {action:?}"
+    );
+    Queued {
+        set: ctx
+            .request_headers_to_set
+            .iter()
+            .map(|(n, v)| (n.as_str().to_owned(), v.to_str().unwrap_or_default().to_owned()))
+            .collect(),
+        removed: ctx
+            .request_headers_to_remove
+            .iter()
+            .map(|n| n.as_str().to_owned())
+            .collect(),
+        extra: ctx
+            .extra_request_headers
+            .iter()
+            .map(|(n, v)| (n.to_string(), v.clone()))
+            .collect(),
+    }
+}
+
+/// Build a request authenticated as `alice`.
+fn request_for_alice() -> crate::Request {
+    let mut req = make_request(Method::POST, "/");
+    req.headers.insert(
+        "Authorization",
+        HeaderValue::from_str(&format!("Bearer {}", mint_jwt(&standard_claims("alice")))).expect("header value"),
+    );
+    req
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_duplicated_asserted_header_is_replaced_not_diffed() {
+    let (_dir, path) = write_assertions_config_named("x-auth-user-id");
+    let filter = build_filter(path);
+
+    let mut req = request_for_alice();
+    req.headers.append("x-auth-user-id", HeaderValue::from_static("root"));
+    req.headers.append("x-auth-user-id", HeaderValue::from_static("alice"));
+    let mut ctx = make_filter_context(&req);
+    let queued = queued_for_echo(&filter, &mut ctx).await;
+
+    assert_eq!(
+        queued.set.get("x-auth-user-id").map(String::as_str),
+        Some("alice"),
+        "the asserted name must be set unconditionally, so the duplicate the \
+         client sent cannot survive beside it; got {:?}",
+        queued.set,
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mixed_case_assertion_is_not_read_as_a_removal() {
+    let (_dir, path) = write_assertions_config_named("X-Auth-User-Id");
+    let filter = build_filter(path);
+
+    let mut req = request_for_alice();
+    req.headers.insert("x-auth-user-id", HeaderValue::from_static("alice"));
+    let mut ctx = make_filter_context(&req);
+    let queued = queued_for_echo(&filter, &mut ctx).await;
+
+    assert_eq!(
+        queued.set.get("x-auth-user-id").map(String::as_str),
+        Some("alice"),
+        "the entry asserts this name, so it is set whatever the request carried; got {:?}",
+        queued.set,
+    );
+    assert!(
+        !queued.removed.contains(&"x-auth-user-id".to_owned()),
+        "and it is not also removed: an asserted name reaching the upstream absent \
+         is the upstream losing the identity it authorizes on; got {:?}",
+        queued.removed,
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_promoted_header_cannot_append_to_an_asserted_name() {
+    let (_dir, path) = write_assertions_config_named("x-auth-user-id");
+    let filter = build_filter(path);
+
+    let req = request_for_alice();
+    let mut ctx = make_filter_context(&req);
+    ctx.extra_request_headers
+        .push((std::borrow::Cow::Borrowed("X-Auth-User-Id"), "root".to_owned()));
+    let queued = queued_for_echo(&filter, &mut ctx).await;
+
+    assert!(
+        queued.extra.is_empty(),
+        "a promotion under an asserted name is dropped, since it would otherwise \
+         be applied last; got {:?}",
+        queued.extra,
+    );
+    assert_eq!(
+        queued.set.get("x-auth-user-id").map(String::as_str),
+        Some("alice"),
+        "and the contract's own value is what reaches the upstream; got {:?}",
+        queued.set,
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pending_set_cannot_survive_a_strip() {
+    let (_dir, path) = write_assertions_config_named("x-auth-user-id");
+    let filter = build_filter(path);
+
+    let req = request_for_alice();
+    let mut ctx = make_filter_context(&req);
+    ctx.request_headers_to_set.push((
+        "x-drop-me".parse().expect("header name"),
+        HeaderValue::from_static("sneaky"),
+    ));
+    let queued = queued_for_echo(&filter, &mut ctx).await;
+
+    assert!(
+        !queued.set.contains_key("x-drop-me"),
+        "a `strip:` is the last word on the name, so the queued set is dropped; got {:?}",
+        queued.set,
+    );
+    assert!(
+        queued.removed.contains(&"x-drop-me".to_owned()),
+        "and the removal is queued even though the request never carried the \
+         header itself; got {:?}",
+        queued.removed,
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_name_no_level_governs_keeps_its_pending_mutations() {
+    let (_dir, path) = write_assertions_config_named("x-auth-user-id");
+    let filter = build_filter(path);
+
+    let req = request_for_alice();
+    let mut ctx = make_filter_context(&req);
+    ctx.request_headers_to_set.push((
+        "x-upstream-authorization".parse().expect("header name"),
+        HeaderValue::from_static("Bearer minted"),
+    ));
+    ctx.extra_request_headers
+        .push((std::borrow::Cow::Borrowed("x-forwarded-for"), "203.0.113.7".to_owned()));
+    let queued = queued_for_echo(&filter, &mut ctx).await;
+
+    assert_eq!(
+        queued.set.get("x-upstream-authorization").map(String::as_str),
+        Some("Bearer minted"),
+        "nothing asserts or strips this name, so the contract has no claim on it; got {:?}",
+        queued.set,
+    );
+    assert_eq!(
+        queued.extra,
+        vec![("x-forwarded-for".to_owned(), "203.0.113.7".to_owned())],
+        "and a promotion under an ungoverned name still reaches the upstream",
+    );
+}
+
+/// Write an L7 policy with response assertions.
+#[expect(clippy::too_many_lines, reason = "test fixture: the YAML literal is the bulk")]
+fn write_response_assertions_config() -> (TempDir, String) {
+    let dir = TempDir::new().expect("create tempdir");
+    let cfg_path = dir.path().join("cpex.yaml");
+    let yaml = format!(
+        r#"plugins:
+  - name: jwt-user
+    kind: identity/jwt
+    hooks:
+      - identity.resolve
+    on_error: fail
+    config:
+      header: Authorization
+      trusted_issuers:
+        - issuer: "{TEST_ISSUER}"
+          audiences: ["{TEST_AUDIENCE}"]
+          algorithms: ["HS256"]
+          decoding_key:
+            kind: secret
+            secret: "{TEST_SECRET}"
+          leeway_seconds: 60
+      claim_mapper: standard
+global:
+  authentication:
+    - jwt-user
+  authorization:
+    pre_invocation:
+      - "require(authenticated)"
+  assertions:
+    response:
+      headers:
+        - name: x-decided-for
+          from: subject.id
+      strip:
+        - server
+"#
+    );
+    std::fs::write(&cfg_path, yaml).expect("write cpex.yaml");
+    (dir, cfg_path.to_str().expect("utf8 path").to_owned())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines, reason = "linear response-contract coverage")]
+async fn response_assertions_reach_the_downstream_response() {
+    let (_dir, path) = write_response_assertions_config();
+    let filter = build_filter(path);
+
+    let req = request_for_alice();
+    let mut ctx = make_filter_context(&req);
+    let action = filter.on_request(&mut ctx).await.expect("header phase ran");
+    assert!(
+        matches!(action, FilterAction::Continue),
+        "the global policy admits an authenticated GET; got {action:?}"
+    );
+
+    let mut response = crate::test_utils::make_response();
+    response
+        .headers
+        .insert("content-type", HeaderValue::from_static("application/json"));
+    response.headers.insert("server", HeaderValue::from_static("gunicorn"));
+    response
+        .headers
+        .insert("x-decided-for", HeaderValue::from_static("root"));
+    ctx.response_header = Some(&mut response);
+
+    let action = filter.on_response(&mut ctx).await.expect("response phase ran");
+    assert!(
+        matches!(action, FilterAction::Continue),
+        "nothing here denies on the way out; got {action:?}"
+    );
+    assert!(
+        ctx.response_headers_modified,
+        "the filter edited the response headers and must say so",
+    );
+
+    let headers = &response.headers;
+    assert_eq!(
+        headers.get("x-decided-for").and_then(|v| v.to_str().ok()),
+        Some("alice"),
+        "the entry renders the resolved subject, replacing what the upstream sent",
+    );
+    assert!(
+        !headers.contains_key("server"),
+        "a `strip:` entry removes the name on the response half too",
+    );
+    assert_eq!(
+        headers.get("content-type").and_then(|v| v.to_str().ok()),
+        Some("application/json"),
+        "and a header no level governs is left exactly as the upstream returned it",
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines, reason = "test fixture: the YAML literal is the bulk")]
+async fn an_entity_route_response_contract_is_refused_at_load() {
+    let dir = TempDir::new().expect("create tempdir");
+    let cfg_path = dir.path().join("cpex.yaml");
+    let yaml = format!(
+        r#"plugins:
+  - name: jwt-user
+    kind: identity/jwt
+    hooks:
+      - identity.resolve
+    on_error: fail
+    config:
+      header: Authorization
+      trusted_issuers:
+        - issuer: "{TEST_ISSUER}"
+          audiences: ["{TEST_AUDIENCE}"]
+          algorithms: ["HS256"]
+          decoding_key:
+            kind: secret
+            secret: "{TEST_SECRET}"
+          leeway_seconds: 60
+      claim_mapper: standard
+global:
+  authentication:
+    - jwt-user
+routes:
+  - tool: echo
+    assertions:
+      response:
+        strip:
+          - server
+    authorization:
+      pre_invocation:
+        - "require(authenticated)"
+"#
+    );
+    std::fs::write(&cfg_path, yaml).expect("write cpex.yaml");
+    let cfg = PolicyFilterConfig {
+        config_path: cfg_path.to_str().expect("utf8 path").to_owned(),
+        allow_private_idp: false,
+        body_access: super::config::BodyAccessMode::ReadOnly,
+        require_protocol_metadata: true,
+        init_timeout_secs: 30,
+        max_buffer_bytes: 10_485_760,
+    };
+    let err = PolicyFilter::new(cfg)
+        .err()
+        .expect("an unappliable response contract must refuse to start");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("tool: echo") && msg.contains("assertions.response"),
+        "the error must name the level to move; got {msg}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_policy_without_a_response_contract_touches_no_response_header() {
+    let (_dir, path) = write_tool_route_config();
+    let filter = build_filter(path);
+
+    let req = request_for_alice();
+    let mut ctx = make_filter_context(&req);
+    let mut response = crate::test_utils::make_response();
+    response.headers.insert("server", HeaderValue::from_static("gunicorn"));
+    ctx.response_header = Some(&mut response);
+
+    drop(filter.on_response(&mut ctx).await.expect("response phase ran"));
+    assert!(!ctx.response_headers_modified, "no contract means no edit",);
+    assert!(
+        response.headers.contains_key("server"),
+        "and the upstream's headers reach the client unchanged",
+    );
+}
+#[tokio::test(flavor = "multi_thread")]
+async fn the_response_half_is_gated_on_the_policy_declaring_one() {
+    let (_dir, path) = write_l7_global_config();
+    assert_eq!(
+        build_filter(path).response_hook(),
+        None,
+        "a `pre_invocation`-only global policy has no response half",
+    );
+
+    let (_dir, path) = write_tool_route_config();
+    assert_eq!(
+        build_filter(path).response_hook(),
+        None,
+        "nor does an entity-routed policy with no response contract",
+    );
+
+    let (_dir, path) = write_response_assertions_config();
+    assert_eq!(
+        build_filter(path).response_hook(),
+        Some("http.response"),
+        "a declared response contract opens the half; the engine applies a \
+         contract at every return site of the hook, registered handler or not",
     );
 }

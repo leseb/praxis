@@ -38,6 +38,10 @@
 //! A policy that declares only a `global` HTTP policy (no entity routes) runs
 //! as a pure L7 authorization check: it authorizes at `on_request` over
 //! `http.*` + identity, needs no classifier, and does not buffer the body.
+//! That path dispatches the `http.request` hook, whose family is the engine's
+//! `HttpHook` rather than `CmfHook`: generic HTTP carries no chat message, so a
+//! handler there reads the request from the extensions and no payload pretends
+//! to hold content a scanner could pass on.
 //! When a policy declares both, the `global` block is enforced as the
 //! per-entity layer on classified entity methods; classified non-entity
 //! methods (`initialize`, `ping`, `tools/list`, …) still pass the identity
@@ -128,6 +132,7 @@
 //! - The HR demo in the praxis-demos repository for an end-to-end walkthrough (identity, Cedar and CEL PDPs,
 //!   delegation, redaction, PII scanning, session taint).
 
+mod assertions;
 mod common_message_format;
 mod config;
 mod error;
