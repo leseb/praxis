@@ -215,9 +215,7 @@ impl FilterPipeline {
                 );
                 continue;
             }
-            let Some(http_filter) =
-                as_request_body_filter(&pf.filter, &pf.conditions, ctx.request, request_phase_tracked)
-            else {
+            let Some(http_filter) = as_request_body_filter(pf, ctx, request_phase_tracked)? else {
                 continue;
             };
             ctx.current_filter_id = Some(pf.filter_id);

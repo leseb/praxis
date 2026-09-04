@@ -5,7 +5,7 @@
 
 use std::sync::{
     Arc,
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use ::http::{HeaderMap, Method, StatusCode};
@@ -3405,6 +3405,286 @@ fn test_pipeline(body_capabilities: BodyCapabilities, filters: Vec<PipelineFilte
         request_body_filter_indices: Vec::new(),
         response_body_filter_indices: Vec::new(),
     })
+}
+
+// -----------------------------------------------------------------------------
+// Body-Phase Condition Tests
+// -----------------------------------------------------------------------------
+
+/// A StreamBuffer body filter that promotes a header from its body hook,
+/// mirroring `json_body_field` (grouped queue) promotion during pre-read.
+struct PromoterBodyFilter {
+    name: &'static str,
+    header: &'static str,
+    value: &'static str,
+    /// `true` promotes via `request_headers_to_set` (Set); `false` via
+    /// `extra_request_headers` (Add).
+    via_set: bool,
+}
+
+#[async_trait]
+impl HttpFilter for PromoterBodyFilter {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn request_body_access(&self) -> BodyAccess {
+        BodyAccess::ReadOnly
+    }
+
+    fn request_body_mode(&self) -> BodyMode {
+        BodyMode::StreamBuffer {
+            max_bytes: Some(65_536),
+        }
+    }
+
+    async fn on_request(&self, _ctx: &mut crate::HttpFilterContext<'_>) -> Result<FilterAction, FilterError> {
+        Ok(FilterAction::Continue)
+    }
+
+    async fn on_request_body(
+        &self,
+        ctx: &mut crate::HttpFilterContext<'_>,
+        _body: &mut Option<Bytes>,
+        _end_of_stream: bool,
+    ) -> Result<FilterAction, FilterError> {
+        if self.via_set {
+            ctx.request_headers_to_set.push((
+                ::http::header::HeaderName::from_bytes(self.header.as_bytes()).unwrap(),
+                ::http::header::HeaderValue::from_str(self.value).unwrap(),
+            ));
+        } else {
+            ctx.extra_request_headers
+                .push((std::borrow::Cow::Borrowed(self.header), self.value.to_owned()));
+        }
+        Ok(FilterAction::BodyDone)
+    }
+}
+
+/// A StreamBuffer body filter that records whether its body hook ran.
+struct GatedRecordingBodyFilter {
+    ran: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl HttpFilter for GatedRecordingBodyFilter {
+    fn name(&self) -> &'static str {
+        "gated_recorder"
+    }
+
+    fn request_body_access(&self) -> BodyAccess {
+        BodyAccess::ReadOnly
+    }
+
+    fn request_body_mode(&self) -> BodyMode {
+        BodyMode::StreamBuffer {
+            max_bytes: Some(65_536),
+        }
+    }
+
+    async fn on_request(&self, _ctx: &mut crate::HttpFilterContext<'_>) -> Result<FilterAction, FilterError> {
+        Ok(FilterAction::Continue)
+    }
+
+    async fn on_request_body(
+        &self,
+        _ctx: &mut crate::HttpFilterContext<'_>,
+        _body: &mut Option<Bytes>,
+        _end_of_stream: bool,
+    ) -> Result<FilterAction, FilterError> {
+        self.ran.store(true, Ordering::SeqCst);
+        Ok(FilterAction::Continue)
+    }
+}
+
+/// Build a single `when: headers: {header: value}` request condition.
+fn gate_condition(header: &str, value: &str) -> Vec<praxis_core::config::Condition> {
+    let mut headers = std::collections::HashMap::new();
+    headers.insert(header.to_owned(), value.to_owned());
+    vec![praxis_core::config::Condition::When(
+        praxis_core::config::ConditionMatch {
+            path: None,
+            path_prefix: None,
+            methods: None,
+            headers: Some(headers),
+        },
+    )]
+}
+
+#[tokio::test]
+async fn body_condition_single_pass_sees_promoted_header() {
+    let ran = Arc::new(AtomicBool::new(false));
+    let pipeline = make_pipeline_with_conditions(vec![
+        (
+            Box::new(PromoterBodyFilter {
+                name: "promoter",
+                header: "x-gate",
+                value: "on",
+                via_set: false,
+            }),
+            vec![],
+        ),
+        (
+            Box::new(GatedRecordingBodyFilter { ran: Arc::clone(&ran) }),
+            gate_condition("x-gate", "on"),
+        ),
+    ]);
+    let req = crate::test_utils::make_request(Method::POST, "/");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    let mut body = Some(Bytes::from_static(b"{}"));
+    let _outcome = pipeline
+        .execute_http_request_body(&mut ctx, &mut body, true)
+        .await
+        .unwrap();
+    assert!(
+        ran.load(Ordering::SeqCst),
+        "gated body filter should run when a promoter set the gate header this pass"
+    );
+}
+
+#[tokio::test]
+async fn body_condition_set_queue_promoter_gates() {
+    let ran = Arc::new(AtomicBool::new(false));
+    let pipeline = make_pipeline_with_conditions(vec![
+        (
+            Box::new(PromoterBodyFilter {
+                name: "promoter",
+                header: "x-gate",
+                value: "on",
+                via_set: true,
+            }),
+            vec![],
+        ),
+        (
+            Box::new(GatedRecordingBodyFilter { ran: Arc::clone(&ran) }),
+            gate_condition("x-gate", "on"),
+        ),
+    ]);
+    let req = crate::test_utils::make_request(Method::POST, "/");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    let mut body = Some(Bytes::from_static(b"{}"));
+    let _outcome = pipeline
+        .execute_http_request_body(&mut ctx, &mut body, true)
+        .await
+        .unwrap();
+    assert!(
+        ran.load(Ordering::SeqCst),
+        "gated body filter should run when a promoter Set the gate header this pass"
+    );
+}
+
+#[tokio::test]
+async fn body_condition_prior_pass_promotion_visible() {
+    let ran = Arc::new(AtomicBool::new(false));
+    let pipeline = make_pipeline_with_conditions(vec![(
+        Box::new(GatedRecordingBodyFilter { ran: Arc::clone(&ran) }),
+        gate_condition("x-gate", "on"),
+    )]);
+    let req = crate::test_utils::make_request(Method::POST, "/");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    ctx.prior_pre_read_mutations.push(crate::TrustedHeaderMutation::Add(
+        "x-gate".parse().unwrap(),
+        "on".to_owned(),
+    ));
+    let mut body = Some(Bytes::from_static(b"{}"));
+    let _outcome = pipeline
+        .execute_http_request_body(&mut ctx, &mut body, true)
+        .await
+        .unwrap();
+    assert!(
+        ran.load(Ordering::SeqCst),
+        "gated body filter should run when the gate header was promoted on a prior pass"
+    );
+}
+
+#[tokio::test]
+async fn body_condition_without_promotion_skips_gated() {
+    let ran = Arc::new(AtomicBool::new(false));
+    let pipeline = make_pipeline_with_conditions(vec![(
+        Box::new(GatedRecordingBodyFilter { ran: Arc::clone(&ran) }),
+        gate_condition("x-gate", "on"),
+    )]);
+    let req = crate::test_utils::make_request(Method::POST, "/");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    let mut body = Some(Bytes::from_static(b"{}"));
+    let _outcome = pipeline
+        .execute_http_request_body(&mut ctx, &mut body, true)
+        .await
+        .unwrap();
+    assert!(
+        !ran.load(Ordering::SeqCst),
+        "gated body filter should be skipped when nothing promoted the gate header"
+    );
+}
+
+#[tokio::test]
+async fn body_condition_promoter_after_gated_skips() {
+    let ran = Arc::new(AtomicBool::new(false));
+    // Promoter is ordered AFTER the gated filter, so the gate is not yet set
+    // when the gated filter's condition is evaluated.
+    let pipeline = make_pipeline_with_conditions(vec![
+        (
+            Box::new(GatedRecordingBodyFilter { ran: Arc::clone(&ran) }),
+            gate_condition("x-gate", "on"),
+        ),
+        (
+            Box::new(PromoterBodyFilter {
+                name: "promoter",
+                header: "x-gate",
+                value: "on",
+                via_set: false,
+            }),
+            vec![],
+        ),
+    ]);
+    let req = crate::test_utils::make_request(Method::POST, "/");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    let mut body = Some(Bytes::from_static(b"{}"));
+    let _outcome = pipeline
+        .execute_http_request_body(&mut ctx, &mut body, true)
+        .await
+        .unwrap();
+    assert!(
+        !ran.load(Ordering::SeqCst),
+        "gated body filter should be skipped when the promoter is ordered after it"
+    );
+}
+
+#[tokio::test]
+async fn body_condition_conflicting_promoters_error() {
+    let ran = Arc::new(AtomicBool::new(false));
+    let pipeline = make_pipeline_with_conditions(vec![
+        (
+            Box::new(PromoterBodyFilter {
+                name: "promoter_a",
+                header: "x-gate",
+                value: "on",
+                via_set: false,
+            }),
+            vec![],
+        ),
+        (
+            Box::new(PromoterBodyFilter {
+                name: "promoter_b",
+                header: "x-gate",
+                value: "off",
+                via_set: false,
+            }),
+            vec![],
+        ),
+        (
+            Box::new(GatedRecordingBodyFilter { ran: Arc::clone(&ran) }),
+            gate_condition("x-gate", "on"),
+        ),
+    ]);
+    let req = crate::test_utils::make_request(Method::POST, "/");
+    let mut ctx = crate::test_utils::make_filter_context(&req);
+    let mut body = Some(Bytes::from_static(b"{}"));
+    let result = pipeline.execute_http_request_body(&mut ctx, &mut body, true).await;
+    assert!(
+        result.is_err(),
+        "two promoters writing different values to the gate header should fail closed"
+    );
 }
 
 /// Build a [`FilterPipeline`] from the given HTTP filters (no conditions).

@@ -15,13 +15,13 @@ use bytes::Bytes;
 use praxis_core::config::FailureMode;
 use tracing::{Instrument as _, debug, info_span, trace, warn};
 
-use super::check_failure_mode;
+use super::{check_failure_mode, filter::PipelineFilter};
 use crate::{
     FilterError,
     actions::{FilterAction, Rejection},
     any_filter::AnyFilter,
-    condition::{should_execute, should_execute_response_ref},
-    context::{HttpFilterContext, Response},
+    condition::{should_execute_from, should_execute_response_ref},
+    context::{EffectiveHeaders, HttpFilterContext, Response},
     metrics::{PHASE_REQUEST, PHASE_RESPONSE, STREAM_BODY, STREAM_HEADERS, record_filter_duration},
 };
 
@@ -50,25 +50,40 @@ pub(super) fn released_or_continue(released: bool) -> FilterAction {
 /// `conditions_resolved` says the request phase already evaluated this
 /// filter's conditions (a skipped filter is unmarked in
 /// `executed_filter_indices` and filtered out before this call), so the
-/// per-chunk re-walk of path/method/header conditions is skipped; the
-/// untracked pre-read path still evaluates them here.
+/// per-chunk re-walk of path/method/header conditions is skipped.
+///
+/// On the untracked pre-read path conditions are re-evaluated here against
+/// the *effective* headers ([`EffectiveHeaders`]): the original request
+/// overlaid with headers earlier pre-read filters promoted from the body. An
+/// ambiguous effective value fails closed as a [`FilterError`] rather than
+/// silently skipping the filter.
+///
+/// # Errors
+///
+/// Returns [`FilterError`] when a conditioned header has no unambiguous
+/// effective value during pre-read.
 pub(super) fn as_request_body_filter<'a>(
-    filter: &'a AnyFilter,
-    conditions: &[praxis_core::config::Condition],
-    request: &crate::context::Request,
+    pf: &'a PipelineFilter,
+    ctx: &HttpFilterContext<'_>,
     conditions_resolved: bool,
-) -> Option<&'a dyn crate::filter::HttpFilter> {
+) -> Result<Option<&'a dyn crate::filter::HttpFilter>, FilterError> {
     // Callers reach here only via the precomputed body-filter index
     // lists, which already encode `request_body_access() != None`.
-    let http_filter = match filter {
-        AnyFilter::Http(f) => f.as_ref(),
-        AnyFilter::Tcp(_) => return None,
+    let AnyFilter::Http(http_filter) = &pf.filter else {
+        return Ok(None);
     };
-    if !conditions_resolved && !should_execute(conditions, request) {
-        trace!(filter = http_filter.name(), "body hook skipped by conditions");
-        return None;
+    if !conditions_resolved {
+        let run = should_execute_from(&pf.conditions, ctx.request, &EffectiveHeaders(ctx))
+            .map_err(|e| FilterError::from(format!("{}: {e}", http_filter.name())))?;
+        if !run {
+            debug!(
+                filter = http_filter.name(),
+                "body hook skipped by conditions (effective headers)"
+            );
+            return Ok(None);
+        }
     }
-    Some(http_filter)
+    Ok(Some(http_filter.as_ref()))
 }
 
 /// Extract an HTTP filter eligible for response body processing.

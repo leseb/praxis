@@ -19,7 +19,11 @@ use praxis_core::{
 use praxis_tls::TlsPeerIdentity;
 
 use crate::{
-    FilterError, IterationState, body::BodyMode, extensions::RequestExtensions, pipeline::body::merge_body_mode,
+    FilterError, IterationState,
+    body::BodyMode,
+    condition::{ConditionError, HeaderSource},
+    extensions::RequestExtensions,
+    pipeline::body::merge_body_mode,
     results::FilterResultSet,
 };
 
@@ -134,6 +138,21 @@ pub enum PendingHeaderResult {
     /// The header was explicitly removed by a pending mutation.
     Removed,
     /// The header has a resolved pending value.
+    Value(String),
+}
+
+/// Tri-state effective value of a header in the trusted mutation log.
+///
+/// Distinguishes "never mentioned" from "explicitly removed" so the pre-read
+/// condition overlay ([`EffectiveHeaders`]) can decide whether to fall through
+/// to the original request or mask it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum TrustedHeaderState {
+    /// No trusted mutation mentioned the header.
+    Absent,
+    /// A trusted mutation removed the header; the original is masked.
+    Removed,
+    /// The header resolved to a single trusted value.
     Value(String),
 }
 
@@ -305,9 +324,16 @@ pub struct HttpFilterContext<'a> {
     /// [`filter_results`]: Self::filter_results
     pub filter_metadata: HashMap<String, String>,
 
-    /// Ordered log of trusted header mutations from pre-read body
-    /// processing. Replayed by the protocol layer after the
-    /// request-phase pipeline runs.
+    /// Trusted header mutations recorded by *earlier* pre-read passes.
+    ///
+    /// Read-only for filters: the protocol layer seeds it before each
+    /// pre-read pass so condition evaluation can see headers a promoter
+    /// wrote on a previous chunk. Empty during the request phase.
+    pub prior_pre_read_mutations: Vec<TrustedHeaderMutation>,
+
+    /// Ordered log of trusted header mutations written during the current
+    /// pass (or, in the request phase, the full accumulated log). Replayed
+    /// by the protocol layer after the request-phase pipeline runs.
     pub pre_read_mutations: Vec<TrustedHeaderMutation>,
 
     /// Structured per-request metadata keyed by namespace.
@@ -680,8 +706,41 @@ impl HttpFilterContext<'_> {
     ///
     /// [`HeaderValue`]: http::header::HeaderValue
     pub fn resolve_trusted_header(&self, name: &HeaderName) -> Result<Option<String>, String> {
-        let values = collect_trusted_values(&self.pre_read_mutations, name)?;
+        let (values, _touched) = collect_trusted_values(self.trusted_mutations(), name)?;
         require_unique_value(values, name, "trusted")
+    }
+
+    /// Resolve the tri-state effective value of a header from the trusted
+    /// mutation log (prior passes followed by the current pass).
+    ///
+    /// Unlike [`resolve_trusted_header`], this distinguishes a header that was
+    /// never mentioned ([`Absent`], fall through to the original request) from
+    /// one an explicit `Remove` cleared ([`Removed`], mask the original), so
+    /// the pre-read condition overlay agrees with the post-merge request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error under the same conditions as [`resolve_trusted_header`]
+    /// (non-text `Set` value, or multiple distinct remaining values).
+    ///
+    /// [`Absent`]: TrustedHeaderState::Absent
+    /// [`Removed`]: TrustedHeaderState::Removed
+    /// [`resolve_trusted_header`]: Self::resolve_trusted_header
+    pub(crate) fn resolve_trusted_header_state(&self, name: &HeaderName) -> Result<TrustedHeaderState, String> {
+        let (values, touched) = collect_trusted_values(self.trusted_mutations(), name)?;
+        match require_unique_value(values, name, "trusted")? {
+            Some(v) => Ok(TrustedHeaderState::Value(v)),
+            None if touched => Ok(TrustedHeaderState::Removed),
+            None => Ok(TrustedHeaderState::Absent),
+        }
+    }
+
+    /// Iterator over trusted mutations in application order: prior passes
+    /// first, then the current pass.
+    fn trusted_mutations(&self) -> impl Iterator<Item = &TrustedHeaderMutation> {
+        self.prior_pre_read_mutations
+            .iter()
+            .chain(self.pre_read_mutations.iter())
     }
 
     /// Resolve the effective pending value of a header from the
@@ -824,23 +883,39 @@ impl HttpFilterContext<'_> {
 // -----------------------------------------------------------------------------
 
 /// Walk the trusted mutation log forward and collect the effective values.
-fn collect_trusted_values(mutations: &[TrustedHeaderMutation], name: &HeaderName) -> Result<Vec<String>, String> {
+///
+/// Returns the surviving values plus whether any mutation *mentioned* `name`.
+/// The latter distinguishes "never mentioned" from "removed": both leave the
+/// value list empty (a `Remove` clears it), so the flag is the only way to tell
+/// them apart for [`HttpFilterContext::resolve_trusted_header_state`].
+fn collect_trusted_values<'m>(
+    mutations: impl Iterator<Item = &'m TrustedHeaderMutation> + 'm,
+    name: &HeaderName,
+) -> Result<(Vec<String>, bool), String> {
     let mut values: Vec<String> = Vec::new();
+    let mut touched = false;
     for mutation in mutations {
         match mutation {
-            TrustedHeaderMutation::Remove(n) if n == name => values.clear(),
+            TrustedHeaderMutation::Remove(n) if n == name => {
+                values.clear();
+                touched = true;
+            },
             TrustedHeaderMutation::Set(n, v) if n == name => {
                 let s = v
                     .to_str()
                     .map_err(|_err| format!("trusted header '{name}' contains non-text bytes"))?;
                 values.clear();
                 values.push(s.to_owned());
+                touched = true;
             },
-            TrustedHeaderMutation::Add(n, v) if n == name => values.push(v.clone()),
+            TrustedHeaderMutation::Add(n, v) if n == name => {
+                values.push(v.clone());
+                touched = true;
+            },
             _ => {},
         }
     }
-    Ok(values)
+    Ok((values, touched))
 }
 
 /// Find the last matching set value for a header name.
@@ -883,6 +958,51 @@ fn require_unique_value(values: Vec<String>, name: &HeaderName, source: &str) ->
         }
     }
     Ok(Some(first))
+}
+
+// -----------------------------------------------------------------------------
+// Effective Headers Overlay
+// -----------------------------------------------------------------------------
+
+/// Header view for pre-read body filters: the original request overlaid with
+/// trusted header mutations.
+///
+/// Lookups resolve in last-writer-wins order: the current pass's grouped
+/// pending queues (via [`pending_header_value`]) first, then the ordered
+/// trusted log (prior passes and this pass, via
+/// [`resolve_trusted_header_state`]), and finally the original request. This
+/// mirrors what the request phase sees after the protocol layer merges the log
+/// into the request, so a body filter can be gated on a header an earlier
+/// pre-read filter promoted from the body.
+///
+/// [`pending_header_value`]: HttpFilterContext::pending_header_value
+/// [`resolve_trusted_header_state`]: HttpFilterContext::resolve_trusted_header_state
+pub(crate) struct EffectiveHeaders<'c, 'r>(pub(crate) &'c HttpFilterContext<'r>);
+
+impl HeaderSource for EffectiveHeaders<'_, '_> {
+    type Error = ConditionError;
+
+    fn header(&self, name: &HeaderName) -> Result<Option<Cow<'_, str>>, ConditionError> {
+        let ctx = self.0;
+        // This pass's grouped queues are the last writer this pass.
+        match ctx.pending_header_value(name).map_err(|_e| ambiguous(name))? {
+            PendingHeaderResult::Removed => return Ok(None),
+            PendingHeaderResult::Value(v) => return Ok(Some(Cow::Owned(v))),
+            PendingHeaderResult::Absent => {},
+        }
+        match ctx.resolve_trusted_header_state(name).map_err(|_e| ambiguous(name))? {
+            TrustedHeaderState::Removed => Ok(None),
+            TrustedHeaderState::Value(v) => Ok(Some(Cow::Owned(v))),
+            // Fall through to the original request. The `Request` source is
+            // infallible, so the error arm is unreachable.
+            TrustedHeaderState::Absent => ctx.request.header(name).map_err(|e| match e {}),
+        }
+    }
+}
+
+/// Build an [`ConditionError::AmbiguousHeader`] for `name`.
+fn ambiguous(name: &HeaderName) -> ConditionError {
+    ConditionError::AmbiguousHeader { header: name.clone() }
 }
 
 // -----------------------------------------------------------------------------
@@ -1774,6 +1894,160 @@ mod tests {
             .push((Cow::Borrowed("x-dest"), "val-b:8080".to_owned()));
         let err = ctx.pending_header_value(&"x-dest".parse().unwrap()).unwrap_err();
         assert!(err.contains("ambiguous"), "distinct extras should error: {err}");
+    }
+
+    // -------------------------------------------------------------------------
+    // resolve_trusted_header_state / EffectiveHeaders Tests
+    // -------------------------------------------------------------------------
+
+    /// Resolve `name` through the pre-read overlay, returning an owned value.
+    fn effective_value(ctx: &HttpFilterContext<'_>, name: &str) -> Result<Option<String>, ConditionError> {
+        use crate::condition::HeaderSource as _;
+        let hname = HeaderName::from_bytes(name.as_bytes()).unwrap();
+        EffectiveHeaders(ctx).header(&hname).map(|opt| opt.map(Cow::into_owned))
+    }
+
+    #[test]
+    fn effective_headers_original_only() {
+        let mut req = crate::test_utils::make_request(Method::GET, "/");
+        req.headers.insert("x-gate", "on".parse().unwrap());
+        let ctx = crate::test_utils::make_filter_context(&req);
+        assert_eq!(
+            effective_value(&ctx, "x-gate").unwrap(),
+            Some("on".to_owned()),
+            "with no mutations the overlay should return the original header"
+        );
+    }
+
+    #[test]
+    fn effective_headers_prior_add_visible() {
+        let req = crate::test_utils::make_request(Method::GET, "/");
+        let mut ctx = crate::test_utils::make_filter_context(&req);
+        ctx.prior_pre_read_mutations
+            .push(TrustedHeaderMutation::Add("x-gate".parse().unwrap(), "on".to_owned()));
+        assert_eq!(
+            effective_value(&ctx, "x-gate").unwrap(),
+            Some("on".to_owned()),
+            "a header promoted on a prior pass should be visible"
+        );
+    }
+
+    #[test]
+    fn effective_headers_this_pass_ordered_add_visible() {
+        let req = crate::test_utils::make_request(Method::GET, "/");
+        let mut ctx = crate::test_utils::make_filter_context(&req);
+        ctx.pre_read_mutations
+            .push(TrustedHeaderMutation::Add("x-gate".parse().unwrap(), "on".to_owned()));
+        assert_eq!(
+            effective_value(&ctx, "x-gate").unwrap(),
+            Some("on".to_owned()),
+            "a header promoted this pass via the ordered log should be visible"
+        );
+    }
+
+    #[test]
+    fn effective_headers_pending_set_wins_over_prior() {
+        let req = crate::test_utils::make_request(Method::GET, "/");
+        let mut ctx = crate::test_utils::make_filter_context(&req);
+        ctx.prior_pre_read_mutations
+            .push(TrustedHeaderMutation::Add("x-gate".parse().unwrap(), "old".to_owned()));
+        ctx.request_headers_to_set
+            .push(("x-gate".parse().unwrap(), "new".parse().unwrap()));
+        assert_eq!(
+            effective_value(&ctx, "x-gate").unwrap(),
+            Some("new".to_owned()),
+            "this pass's grouped queue should win over a prior-pass value"
+        );
+    }
+
+    #[test]
+    fn effective_headers_prior_remove_masks_present_original() {
+        let mut req = crate::test_utils::make_request(Method::GET, "/");
+        req.headers.insert("x-gate", "on".parse().unwrap());
+        let mut ctx = crate::test_utils::make_filter_context(&req);
+        ctx.prior_pre_read_mutations
+            .push(TrustedHeaderMutation::Remove("x-gate".parse().unwrap()));
+        assert_eq!(
+            effective_value(&ctx, "x-gate").unwrap(),
+            None,
+            "a trusted Remove should mask the original header"
+        );
+    }
+
+    #[test]
+    fn effective_headers_ambiguous_errors() {
+        let req = crate::test_utils::make_request(Method::GET, "/");
+        let mut ctx = crate::test_utils::make_filter_context(&req);
+        ctx.prior_pre_read_mutations
+            .push(TrustedHeaderMutation::Add("x-gate".parse().unwrap(), "a".to_owned()));
+        ctx.prior_pre_read_mutations
+            .push(TrustedHeaderMutation::Add("x-gate".parse().unwrap(), "b".to_owned()));
+        assert!(
+            effective_value(&ctx, "x-gate").is_err(),
+            "two distinct promoted values should be an error"
+        );
+    }
+
+    #[test]
+    fn resolve_trusted_header_state_add_then_remove_is_removed() {
+        let req = crate::test_utils::make_request(Method::GET, "/");
+        let mut ctx = crate::test_utils::make_filter_context(&req);
+        ctx.pre_read_mutations.push(TrustedHeaderMutation::Add(
+            "x-dest".parse().unwrap(),
+            "host:8080".to_owned(),
+        ));
+        ctx.pre_read_mutations
+            .push(TrustedHeaderMutation::Remove("x-dest".parse().unwrap()));
+        assert_eq!(
+            ctx.resolve_trusted_header_state(&"x-dest".parse().unwrap()).unwrap(),
+            TrustedHeaderState::Removed,
+            "Add then Remove should resolve to Removed, not Absent"
+        );
+    }
+
+    #[test]
+    fn resolve_trusted_header_state_absent_when_never_mentioned() {
+        let req = crate::test_utils::make_request(Method::GET, "/");
+        let ctx = crate::test_utils::make_filter_context(&req);
+        assert_eq!(
+            ctx.resolve_trusted_header_state(&"x-dest".parse().unwrap()).unwrap(),
+            TrustedHeaderState::Absent,
+            "an unmentioned header should resolve to Absent"
+        );
+    }
+
+    #[test]
+    fn resolve_trusted_header_state_walks_prior_then_current() {
+        let req = crate::test_utils::make_request(Method::GET, "/");
+        let mut ctx = crate::test_utils::make_filter_context(&req);
+        ctx.prior_pre_read_mutations.push(TrustedHeaderMutation::Add(
+            "x-dest".parse().unwrap(),
+            "old:8080".to_owned(),
+        ));
+        ctx.pre_read_mutations.push(TrustedHeaderMutation::Set(
+            "x-dest".parse().unwrap(),
+            "new:9090".parse().unwrap(),
+        ));
+        assert_eq!(
+            ctx.resolve_trusted_header_state(&"x-dest".parse().unwrap()).unwrap(),
+            TrustedHeaderState::Value("new:9090".to_owned()),
+            "current-pass Set should override a prior-pass Add"
+        );
+    }
+
+    #[test]
+    fn resolve_trusted_header_walks_prior_then_current() {
+        let req = crate::test_utils::make_request(Method::GET, "/");
+        let mut ctx = crate::test_utils::make_filter_context(&req);
+        ctx.prior_pre_read_mutations.push(TrustedHeaderMutation::Add(
+            "x-dest".parse().unwrap(),
+            "host:8080".to_owned(),
+        ));
+        assert_eq!(
+            ctx.resolve_trusted_header(&"x-dest".parse().unwrap()).unwrap(),
+            Some("host:8080".to_owned()),
+            "resolve_trusted_header should see prior-pass mutations"
+        );
     }
 
     // -------------------------------------------------------------------------

@@ -1,0 +1,74 @@
+# Per-Model Guardrails
+#
+# Runs body-inspecting guardrails only for a model selected from the request body.
+#
+# `json_body_field` promotes the JSON `model` field into the reserved
+# `x-praxis-guard-model` header during StreamBuffer pre-read, and the
+# `guardrails` filter is gated on that header so it inspects bodies only for
+# the guarded model. Other models skip guardrails entirely.
+#
+# The gate header must be a reserved `x-praxis-*` name: clients cannot supply
+# reserved headers (they are rejected at ingress), so the gate reflects the
+# promoted body value and cannot be spoofed. Conditionally running a security
+# filter is a deliberate bypass for non-matching requests, so it is opted into
+# explicitly via `insecure_options.skip_pipeline_checks.conditional_security`.
+#
+# Usage:
+#   cargo run -p praxis-proxy -- \
+#     -c examples/configs/security/guardrails-per-model.yaml
+#
+# Exercise:
+#   # 403: guarded model with a forbidden body
+#   curl -d '{"model":"guarded-model","prompt":"forbidden"}' \
+#     http://localhost:8080/
+#
+#   # 200: guarded model with a clean body
+#   curl -d '{"model":"guarded-model","prompt":"hello"}' \
+#     http://localhost:8080/
+#
+#   # 200: a different model skips guardrails entirely
+#   curl -d '{"model":"other-model","prompt":"forbidden"}' \
+#     http://localhost:8080/
+
+listeners:
+  - name: default
+    address: "127.0.0.1:8080"
+    filter_chains:
+      - main
+
+filter_chains:
+  - name: main
+    filters:
+      # Promote the body's `model` field into a reserved, client-unspoofable
+      # header during pre-read.
+      - filter: json_body_field
+        field: model
+        header: x-praxis-guard-model
+
+      # Inspect bodies only when the promoted model is the guarded one.
+      - filter: guardrails
+        conditions:
+          - when:
+              headers:
+                x-praxis-guard-model: guarded-model
+        rules:
+          - target: body
+            contains: "forbidden"
+
+      - filter: router
+        routes:
+          - path_prefix: "/"
+            cluster: backend
+
+      - filter: load_balancer
+        clusters:
+          - name: backend
+            endpoints:
+              - "127.0.0.1:3000"
+
+insecure_options:
+  allow_private_endpoints: true # example proxies to a local backend
+  skip_pipeline_checks:
+    # Per-model guardrails intentionally bypasses guardrails for non-guarded
+    # models; acknowledge the conditional-security bypass explicitly.
+    conditional_security: true

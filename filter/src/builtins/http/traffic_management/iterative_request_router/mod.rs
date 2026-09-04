@@ -1117,6 +1117,7 @@ fn build_sub_filter_context<'a>(
         session_stores: None,
         metrics_route: None,
         peer_identity: runtime.peer_identity.cloned(),
+        prior_pre_read_mutations: Vec::new(),
         pre_read_mutations: Vec::new(),
         request,
         request_body_bytes: 0,

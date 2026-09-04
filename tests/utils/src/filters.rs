@@ -62,6 +62,52 @@ impl HttpFilter for HeaderMutatingStreamBufferFilter {
     }
 }
 
+/// Test probe for body-phase condition gating through `StreamBuffer`.
+///
+/// A [`ReadOnly`] `StreamBuffer` body filter that, when its body hook runs
+/// (i.e. its `conditions` matched during pre-read), stamps a
+/// backend-visible `x-gated-ran: yes` request header. The absence of that
+/// header at the backend means the filter was gated out.
+///
+/// [`ReadOnly`]: praxis_filter::BodyAccess::ReadOnly
+pub struct ConditionRecordingStreamBufferFilter;
+
+#[async_trait]
+impl HttpFilter for ConditionRecordingStreamBufferFilter {
+    fn name(&self) -> &'static str {
+        "condition_recorder"
+    }
+
+    fn request_body_access(&self) -> BodyAccess {
+        BodyAccess::ReadOnly
+    }
+
+    fn request_body_mode(&self) -> BodyMode {
+        BodyMode::StreamBuffer {
+            max_bytes: Some(65_536),
+        }
+    }
+
+    async fn on_request(&self, _ctx: &mut HttpFilterContext<'_>) -> Result<FilterAction, FilterError> {
+        Ok(FilterAction::Continue)
+    }
+
+    async fn on_request_body(
+        &self,
+        ctx: &mut HttpFilterContext<'_>,
+        _body: &mut Option<Bytes>,
+        end_of_stream: bool,
+    ) -> Result<FilterAction, FilterError> {
+        if end_of_stream {
+            ctx.request_headers_to_set.push((
+                http::header::HeaderName::from_static("x-gated-ran"),
+                http::header::HeaderValue::from_static("yes"),
+            ));
+        }
+        Ok(FilterAction::Continue)
+    }
+}
+
 /// Test-only probe for the `ReadWrite` + `StreamBuffer` adapter contract.
 ///
 /// Exercises body mutation, path rewrite, and cluster selection during

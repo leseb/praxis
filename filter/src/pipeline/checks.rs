@@ -16,7 +16,7 @@
 //! [`SkipPipelineChecks`]: praxis_core::config::SkipPipelineChecks
 //! [`FilterPipeline::ordering_errors`]: super::FilterPipeline::ordering_errors
 
-use praxis_core::config::{FailureMode, FilterEntry};
+use praxis_core::config::{Condition, FailureMode, FilterEntry};
 use tracing::warn;
 
 use super::{branch::RejoinTarget, filter::PipelineFilter};
@@ -48,6 +48,31 @@ const REWRITE_FILTERS: &[&str] = &["path_rewrite", "url_rewrite"];
 // -----------------------------------------------------------------------------
 // Error Checks
 // -----------------------------------------------------------------------------
+
+/// Reject request conditions whose `headers` key is not a valid HTTP header
+/// name.
+///
+/// Such a name can never equal a real request header, so the filter would be
+/// silently skipped forever — the same fail-open footgun this validation
+/// exists to prevent. Failing at build turns it into a clear config error.
+pub(super) fn check_condition_header_names(filters: &[PipelineFilter], errors: &mut Vec<String>) {
+    for pf in filters {
+        for condition in &pf.conditions {
+            let (Condition::When(m) | Condition::Unless(m)) = condition;
+            let Some(headers) = &m.headers else {
+                continue;
+            };
+            for name in headers.keys() {
+                if http::header::HeaderName::from_bytes(name.as_bytes()).is_err() {
+                    errors.push(format!(
+                        "filter '{}' has a condition with an invalid header name '{name}'",
+                        pf.filter.name(),
+                    ));
+                }
+            }
+        }
+    }
+}
 
 /// `load_balancer` without a filter that sets `ctx.cluster` will fail
 /// every request with "no cluster selected".
@@ -538,7 +563,7 @@ fn has_allow_rewrite_override(entries: &[FilterEntry], idx: usize) -> bool {
 mod tests {
     use std::sync::Arc;
 
-    use praxis_core::config::{Condition, ConditionMatch};
+    use praxis_core::config::ConditionMatch;
 
     use super::*;
     use crate::pipeline::{
@@ -558,6 +583,43 @@ mod tests {
             actual, expected,
             "pipeline checks and registry security metadata diverged"
         );
+    }
+
+    #[test]
+    fn invalid_condition_header_name_rejected_at_build() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("x gate".to_owned(), "on".to_owned());
+        let condition = Condition::When(ConditionMatch {
+            path: None,
+            path_prefix: None,
+            methods: None,
+            headers: Some(headers),
+        });
+        let filters = vec![noop_filter_with_conditions("gated", vec![condition])];
+        let mut errors = Vec::new();
+        check_condition_header_names(&filters, &mut errors);
+        assert_eq!(errors.len(), 1, "invalid condition header name should error");
+        assert!(
+            errors[0].contains("invalid header name") && errors[0].contains("x gate"),
+            "error should name the invalid header: {}",
+            errors[0]
+        );
+    }
+
+    #[test]
+    fn valid_condition_header_name_accepted_at_build() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("x-gate".to_owned(), "on".to_owned());
+        let condition = Condition::When(ConditionMatch {
+            path: None,
+            path_prefix: None,
+            methods: None,
+            headers: Some(headers),
+        });
+        let filters = vec![noop_filter_with_conditions("gated", vec![condition])];
+        let mut errors = Vec::new();
+        check_condition_header_names(&filters, &mut errors);
+        assert!(errors.is_empty(), "valid header name should not error: {errors:?}");
     }
 
     #[test]

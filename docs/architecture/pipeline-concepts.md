@@ -151,6 +151,36 @@ independent — a filter can have both. Branch
 conditions (`on_result`) are evaluated after the
 filter runs but before the pipeline advances.
 
+### Body-phase conditions in StreamBuffer mode
+
+Body-inspecting filters use `BodyMode::StreamBuffer`,
+so their body hooks run in pre-read, before the
+request phase. A body filter's `conditions.headers`
+are evaluated there against the *effective* request
+headers: the original request overlaid with headers
+that earlier pre-read filters promoted from the body
+(prior passes and earlier filters in the same pass).
+
+This composes `json_body_field` with
+`conditions.headers`: promote a body field to a header,
+then gate a later body filter on it. The promoter must
+precede the gated filter in the chain. If two pre-read
+filters promote different values to one conditioned
+header, evaluation fails closed with a 500 rather than
+guessing.
+
+For the body-phase and request-phase decisions to
+agree, the gate header must be absent from the original
+request. Use a reserved `x-praxis-*` name: clients
+cannot supply reserved headers (they are rejected at
+ingress), so the gate reflects the promoted body value
+and cannot be spoofed. Gating a security filter is a
+deliberate bypass for non-matching requests, so it must
+be opted into via
+`insecure_options.skip_pipeline_checks.conditional_security`.
+See
+[`examples/configs/security/guardrails-per-model.yaml`](../../examples/configs/security/guardrails-per-model.yaml).
+
 For condition syntax, see
 [Payload Processing](payload-processing.md). For
 branch conditions, see

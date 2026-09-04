@@ -119,6 +119,7 @@ page.
 | [csrf.yaml](configs/security/csrf.yaml) | Cross-site request forgery protection via origin validation |
 | [downstream-read-timeout.yaml](configs/security/downstream-read-timeout.yaml) | Protects against slow client attacks by limiting how long the proxy waits for data from downstream clients |
 | [forwarded-headers.yaml](configs/security/forwarded-headers.yaml) | Injects X-Forwarded-For, X-Forwarded-Proto, and X-Forwarded-Host into upstream requests |
+| [guardrails-per-model.yaml](configs/security/guardrails-per-model.yaml) | Runs body-inspecting guardrails only for a model selected from the request body |
 | [guardrails.yaml](configs/security/guardrails.yaml) | Reject requests that match header or body inspection rules |
 | [ip-acl.yaml](configs/security/ip-acl.yaml) | Allow or deny requests by source IP/CIDR |
 | [peer-identity-trust.yaml](configs/security/peer-identity-trust.yaml) | Validates downstream mTLS peer identity against a set of trusted peers |

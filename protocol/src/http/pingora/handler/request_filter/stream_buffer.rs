@@ -8,7 +8,8 @@ use std::{collections::VecDeque, fmt::Write as _};
 use pingora_proxy::Session;
 use praxis_core::config::ABSOLUTE_MAX_BODY_BYTES;
 use praxis_filter::{
-    BodyBuffer, BodyMode, FilterAction, FilterError, FilterPipeline, Rejection, Request, TrustedHeaderMutation,
+    BodyBuffer, BodyMode, FilterAction, FilterError, FilterPipeline, HttpFilterContext, Rejection, Request,
+    TrustedHeaderMutation,
 };
 use tracing::{debug, warn};
 
@@ -165,9 +166,30 @@ pub(super) async fn pre_read_body(
         };
 
         let mut filter_ctx = ctx.build_filter_context(pipeline, request, None);
+        // Seed the read-only prior log so this pass's condition evaluation
+        // sees headers earlier passes promoted from the body.
+        filter_ctx.prior_pre_read_mutations = std::mem::take(&mut mutation_log);
+
         let action = pipeline
             .execute_http_request_body(&mut filter_ctx, &mut body, end_of_stream)
             .await;
+
+        // Restore the prior log (filters never write it) and append this
+        // pass's mutations, before the copy-backs partially move filter_ctx.
+        mutation_log = std::mem::take(&mut filter_ctx.prior_pre_read_mutations);
+        if filter_ctx.pre_read_mutations.is_empty() {
+            // Fallback for filters that only populate the legacy grouped
+            // mutation queues. This preserves their existing remove -> set
+            // -> add application order.
+            //
+            // A pre-read chain must use one mutation mechanism for forwarded
+            // header provenance: either the ordered pre_read_mutations log or
+            // these legacy grouped queues. Mixing them would make ordering
+            // ambiguous, so the ordered log takes precedence when present.
+            push_grouped_queues(&filter_ctx, &mut mutation_log);
+        } else {
+            mutation_log.extend(filter_ctx.pre_read_mutations);
+        }
 
         ctx.request_body_bytes = original_body_bytes;
         ctx.cluster = filter_ctx.cluster;
@@ -186,35 +208,6 @@ pub(super) async fn pre_read_body(
         ctx.cached_executed_filter_indices = filter_ctx.executed_filter_indices;
         ctx.cached_body_done_indices = filter_ctx.body_done_indices;
         ctx.structured_metadata = filter_ctx.structured_metadata;
-
-        if filter_ctx.pre_read_mutations.is_empty() {
-            // Fallback for filters that only populate the legacy grouped
-            // mutation queues. This preserves their existing remove -> set
-            // -> add application order.
-            //
-            // A pre-read chain must use one mutation mechanism for forwarded
-            // header provenance: either the ordered pre_read_mutations log or
-            // these legacy grouped queues. Mixing them would make ordering
-            // ambiguous, so the ordered log takes precedence when present.
-            for name in &filter_ctx.request_headers_to_remove {
-                mutation_log.push(TrustedHeaderMutation::Remove(name.clone()));
-            }
-            for (name, value) in &filter_ctx.request_headers_to_set {
-                mutation_log.push(TrustedHeaderMutation::Set(name.clone(), value.clone()));
-            }
-            for (name, value) in &filter_ctx.extra_request_headers {
-                if let (Ok(hname), Ok(_)) = (
-                    http::header::HeaderName::from_bytes(name.as_bytes()),
-                    http::header::HeaderValue::from_str(value),
-                ) {
-                    mutation_log.push(TrustedHeaderMutation::Add(hname, value.clone()));
-                } else {
-                    warn!(header = %name, "skipping invalid promoted header");
-                }
-            }
-        } else {
-            mutation_log.extend(filter_ctx.pre_read_mutations);
-        }
 
         match action {
             Ok(
@@ -263,6 +256,30 @@ pub(super) async fn pre_read_body(
     Ok(PreReadMutations {
         mutations: mutation_log,
     })
+}
+
+/// Append a pre-read context's legacy grouped header queues to `log` as
+/// ordered trusted mutations (remove -> set -> add).
+///
+/// Used only when a pass wrote no ordered `pre_read_mutations`, so the two
+/// mechanisms never mix within one pass.
+fn push_grouped_queues(filter_ctx: &HttpFilterContext<'_>, log: &mut Vec<TrustedHeaderMutation>) {
+    for name in &filter_ctx.request_headers_to_remove {
+        log.push(TrustedHeaderMutation::Remove(name.clone()));
+    }
+    for (name, value) in &filter_ctx.request_headers_to_set {
+        log.push(TrustedHeaderMutation::Set(name.clone(), value.clone()));
+    }
+    for (name, value) in &filter_ctx.extra_request_headers {
+        if let (Ok(hname), Ok(_)) = (
+            http::header::HeaderName::from_bytes(name.as_bytes()),
+            http::header::HeaderValue::from_str(value),
+        ) {
+            log.push(TrustedHeaderMutation::Add(hname, value.clone()));
+        } else {
+            warn!(header = %name, "skipping invalid promoted header");
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------

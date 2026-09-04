@@ -61,6 +61,13 @@ struct Promoted;
 /// If the field is missing or the body is not valid JSON before the needed
 /// fields are collected, the filter passes through without modification.
 ///
+/// A promoted header can gate a later body filter in the same chain via that
+/// filter's `conditions.headers`, which are evaluated against the effective
+/// pre-read headers (the request overlaid with promotions from earlier
+/// pre-read filters). The promoter must precede the gated filter. Use a
+/// reserved `x-praxis-*` name for security-relevant gates so clients cannot
+/// supply the header themselves.
+///
 /// # Single-field YAML
 ///
 /// ```yaml

@@ -350,6 +350,8 @@ macro_rules! filter_context {
             request_headers_to_remove: Vec::new(),
             request_headers_to_set: Vec::new(),
             filter_metadata: std::mem::take(&mut $ctx.filter_metadata),
+            // Seeded per pre-read pass by `pre_read_body`; empty otherwise.
+            prior_pre_read_mutations: Vec::new(),
             pre_read_mutations: std::mem::take(&mut $ctx.pre_read_mutations),
             structured_metadata: std::mem::take(&mut $ctx.structured_metadata),
             filter_results: std::mem::take(&mut $ctx.filter_results),

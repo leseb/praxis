@@ -269,6 +269,7 @@ impl IrrStreamingBody {
             kv_stores: cont.pipeline.kv_stores(),
             metrics_route: None,
             peer_identity: cont.peer_identity.clone(),
+            prior_pre_read_mutations: Vec::new(),
             pre_read_mutations: Vec::new(),
             request: &cont.request_snapshot,
             request_body_bytes: 0,

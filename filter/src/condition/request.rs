@@ -3,13 +3,25 @@
 
 //! Request condition evaluation for gating filter execution.
 
+use std::{borrow::Cow, convert::Infallible};
+
+use http::header::HeaderName;
 use praxis_core::config::{Condition, ConditionMatch};
 
+use super::HeaderSource;
 use crate::context::Request;
 
 // -----------------------------------------------------------------------------
 // Request Condition Evaluation
 // -----------------------------------------------------------------------------
+
+impl HeaderSource for Request {
+    type Error = Infallible;
+
+    fn header(&self, name: &HeaderName) -> Result<Option<Cow<'_, str>>, Infallible> {
+        Ok(self.headers.get(name).and_then(|v| v.to_str().ok()).map(Cow::Borrowed))
+    }
+}
 
 /// Returns true if the filter should execute given its conditions.
 ///
@@ -48,37 +60,56 @@ use crate::context::Request;
 /// assert!(!should_execute(&[unless], &req));
 /// ```
 pub fn should_execute(conditions: &[Condition], req: &Request) -> bool {
+    match should_execute_from(conditions, req, req) {
+        Ok(run) => run,
+        // The `Request` header source is infallible; this arm is unreachable.
+        Err(never) => match never {},
+    }
+}
+
+/// Returns whether the filter should execute, reading header values from
+/// `source` instead of the original request.
+///
+/// Path and method predicates always read `req`; only the header predicate
+/// consults `source`. The request phase passes the request itself
+/// (infallible); the pre-read body phase passes an overlay that can fail when
+/// a conditioned header has no unambiguous effective value.
+pub(crate) fn should_execute_from<S: HeaderSource>(
+    conditions: &[Condition],
+    req: &Request,
+    source: &S,
+) -> Result<bool, S::Error> {
     for condition in conditions {
         match condition {
             Condition::When(m) => {
-                if !matches_request(m, req) {
-                    return false;
+                if !matches_request_from(m, req, source)? {
+                    return Ok(false);
                 }
             },
             Condition::Unless(m) => {
-                if matches_request(m, req) {
-                    return false;
+                if matches_request_from(m, req, source)? {
+                    return Ok(false);
                 }
             },
         }
     }
-    true
+    Ok(true)
 }
 
-/// Returns true if all specified fields in the predicate match the request.
-/// Unset fields impose no constraint (vacuously true).
-fn matches_request(m: &ConditionMatch, req: &Request) -> bool {
-    if let Some(exact) = &m.path {
-        let req_path = req.uri.path();
-        if req_path != exact {
-            return false;
-        }
+/// Returns true if all specified fields in the predicate match the request,
+/// reading header values from `source`. Unset fields impose no constraint
+/// (vacuously true).
+fn matches_request_from<S: HeaderSource>(m: &ConditionMatch, req: &Request, source: &S) -> Result<bool, S::Error> {
+    if let Some(exact) = &m.path
+        && req.uri.path() != exact
+    {
+        return Ok(false);
     }
 
     if let Some(prefix) = &m.path_prefix
         && !crate::path_match::path_prefix_matches(req.uri.path(), prefix)
     {
-        return false;
+        return Ok(false);
     }
 
     if let Some(methods) = &m.methods
@@ -86,19 +117,25 @@ fn matches_request(m: &ConditionMatch, req: &Request) -> bool {
             .iter()
             .any(|method| method.eq_ignore_ascii_case(req.method.as_str()))
     {
-        return false;
+        return Ok(false);
     }
 
     if let Some(headers) = &m.headers {
         for (name, value) in headers {
-            match req.headers.get(name) {
-                Some(v) if v.to_str().ok() == Some(value.as_str()) => {},
-                _ => return false,
+            // An unparseable condition header name can never equal a real
+            // request header, so it is a no-match (build validation rejects
+            // such names up front; this keeps evaluation total).
+            let Ok(header_name) = HeaderName::from_bytes(name.as_bytes()) else {
+                return Ok(false);
+            };
+            match source.header(&header_name)? {
+                Some(v) if v.as_ref() == value.as_str() => {},
+                _ => return Ok(false),
             }
         }
     }
 
-    true
+    Ok(true)
 }
 
 // -----------------------------------------------------------------------------
@@ -401,6 +438,108 @@ mod tests {
             !should_execute(&[when(path_match("/api/v1"))], &req),
             "path /api should not match prefix /api/v1"
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // should_execute_from / HeaderSource overlay
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn should_execute_from_request_matches_original() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-gate", HeaderValue::from_static("on"));
+        let req = make_request(Method::GET, "/", headers);
+        let run = should_execute_from(&[when(header_match(&[("x-gate", "on")]))], &req, &req).unwrap();
+        assert!(run, "request source should match its own header");
+    }
+
+    #[test]
+    fn should_execute_from_overlay_sees_added_header() {
+        // The request has no x-gate, but the overlay source does.
+        let req = make_request(Method::GET, "/", HeaderMap::new());
+        let source = MockSource::with(&[("x-gate", "on")]);
+        let run = should_execute_from(&[when(header_match(&[("x-gate", "on")]))], &req, &source).unwrap();
+        assert!(run, "overlay-added header should satisfy the condition");
+    }
+
+    #[test]
+    fn should_execute_from_overlay_remove_masks_original() {
+        // The request has x-gate, but the overlay masks it (returns None).
+        let mut headers = HeaderMap::new();
+        headers.insert("x-gate", HeaderValue::from_static("on"));
+        let req = make_request(Method::GET, "/", headers);
+        let source = MockSource::empty();
+        let run = should_execute_from(&[when(header_match(&[("x-gate", "on")]))], &req, &source).unwrap();
+        assert!(!run, "overlay masking the original header should skip the filter");
+    }
+
+    #[test]
+    fn should_execute_from_overlay_propagates_ambiguity() {
+        let req = make_request(Method::GET, "/", HeaderMap::new());
+        let source = MockSource::ambiguous("x-gate");
+        let result = should_execute_from(&[when(header_match(&[("x-gate", "on")]))], &req, &source);
+        assert!(
+            result.is_err(),
+            "an ambiguous overlay value should propagate as an error"
+        );
+    }
+
+    #[test]
+    fn should_execute_from_invalid_condition_name_is_no_match() {
+        let req = make_request(Method::GET, "/", HeaderMap::new());
+        // A space makes the name invalid; it can never equal a real header.
+        let run = should_execute_from(&[when(header_match(&[("x gate", "on")]))], &req, &req).unwrap();
+        assert!(!run, "an invalid condition header name should be a no-match");
+    }
+
+    /// Test-only [`HeaderSource`] returning configured values or an error.
+    struct MockSource {
+        values: HashMap<HeaderName, String>,
+        ambiguous: std::collections::HashSet<HeaderName>,
+    }
+
+    /// Opaque error for [`MockSource`].
+    #[derive(Debug)]
+    struct MockError;
+
+    impl MockSource {
+        fn empty() -> Self {
+            Self {
+                values: HashMap::new(),
+                ambiguous: std::collections::HashSet::new(),
+            }
+        }
+
+        fn with(pairs: &[(&str, &str)]) -> Self {
+            let mut values = HashMap::new();
+            for (k, v) in pairs {
+                values.insert(HeaderName::from_bytes(k.as_bytes()).unwrap(), (*v).to_owned());
+            }
+            Self {
+                values,
+                ambiguous: std::collections::HashSet::new(),
+            }
+        }
+
+        fn ambiguous(name: &str) -> Self {
+            let mut ambiguous = std::collections::HashSet::new();
+            ambiguous.insert(HeaderName::from_bytes(name.as_bytes()).unwrap());
+            Self {
+                values: HashMap::new(),
+                ambiguous,
+            }
+        }
+    }
+
+    impl HeaderSource for MockSource {
+        type Error = MockError;
+
+        fn header(&self, name: &HeaderName) -> Result<Option<Cow<'_, str>>, MockError> {
+            if self.ambiguous.contains(name) {
+                return Err(MockError);
+            }
+            Ok(self.values.get(name).map(|v| Cow::Borrowed(v.as_str())))
+        }
     }
 
     // -------------------------------------------------------------------------
