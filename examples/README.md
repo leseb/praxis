@@ -37,6 +37,7 @@ page.
 | ------ | ------------- |
 | [access-log-fields.yaml](configs/observability/access-log-fields.yaml) | Logs only server errors with a lean field set |
 | [access-logging.yaml](configs/observability/access-logging.yaml) | Structured JSON logging with sampling; logs ~10% of requests. request_id ensures each log line has a correlation ID. access_log emits method, path, status, and timing |
+| [http-active-requests.yaml](configs/observability/http-active-requests.yaml) | Prometheus gauge for HTTP requests currently in flight per listener |
 | [logging.yaml](configs/observability/logging.yaml) | request_id — ensures every request has a correlation ID |
 | [process-logging.yaml](configs/observability/process-logging.yaml) | Non-blocking process logs written to a file |
 | [tcp-access-log.yaml](configs/observability/tcp-access-log.yaml) | Structured JSON logging of TCP connection events (connect and disconnect) |

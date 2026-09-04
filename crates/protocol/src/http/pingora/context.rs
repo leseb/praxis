@@ -174,6 +174,9 @@ pub struct PingoraRequestCtx {
     /// RAII guard that decrements `praxis_connections_active` on drop.
     pub(crate) _active_connection: Option<crate::http::pingora::metrics::ActiveConnectionGuard>,
 
+    /// RAII guard that decrements `praxis_http_active_requests` on drop.
+    pub(crate) _active_request: Option<crate::http::pingora::metrics::ActiveRequestGuard>,
+
     /// When the current upstream connect attempt started.
     pub upstream_connect_start: Option<Instant>,
 
@@ -541,6 +544,7 @@ impl Default for PingoraRequestCtx {
             metrics_cluster_shared: None,
             metrics_route: None,
             _active_connection: None,
+            _active_request: None,
             upstream_connect_start: None,
             pre_read_body: None,
             request_body_buffer: None,

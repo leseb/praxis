@@ -164,6 +164,26 @@ Wall-clock duration of completed HTTP requests in
 seconds. Uses the same label set as
 `praxis_http_requests_total`.
 
+#### `praxis_http_active_requests` (gauge)
+
+HTTP requests currently in flight, incremented when a
+request is admitted and decremented when it finishes.
+
+| Label | Values |
+| ---------- | ---------------------------------------- |
+| `listener` | Listener name from config |
+
+Requests rejected by overload protection (memory
+pressure, global or per-listener connection limits)
+are never admitted and do not appear here. The
+decrement is tied to the request context's lifetime,
+so it also fires when a client aborts mid-body or an
+HTTP/2 stream is reset.
+
+Unlike `praxis_connections_active`, which counts HTTP
+requests and TCP sessions under one name, this series
+carries only HTTP requests.
+
 ### TCP Connection Metrics
 
 These are recorded automatically for every TCP

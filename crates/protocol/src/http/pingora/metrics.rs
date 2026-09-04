@@ -36,6 +36,13 @@ const HTTP_RESPONSE_BODY_BYTES: &str = "praxis_http_response_body_bytes";
 /// (see TCP proxy listener-name map).
 const CONNECTIONS_ACTIVE: &str = "praxis_connections_active";
 
+/// Gauge for in-flight HTTP requests per listener.
+///
+/// Unlike `praxis_connections_active`, which counts HTTP requests and TCP
+/// sessions under one name, this series carries only HTTP requests, so
+/// `sum()` over it is meaningful without knowing each listener's protocol.
+const HTTP_ACTIVE_REQUESTS: &str = "praxis_http_active_requests";
+
 /// Counter for connections rejected by overload protection.
 const OVERLOAD_REJECTS_TOTAL: &str = "praxis_overload_rejects_total";
 
@@ -331,6 +338,35 @@ impl Drop for ActiveConnectionGuard {
     }
 }
 
+/// RAII guard that decrements `praxis_http_active_requests` on drop.
+///
+/// Acquired once per HTTP request, alongside [`ActiveConnectionGuard`].
+/// Pingora owns the request context by value, so the drop runs on every
+/// terminal path (including a client abort or an HTTP/2 stream reset,
+/// which skip the `logging` callback entirely).
+pub struct ActiveRequestGuard {
+    /// Listener name label.
+    listener: SharedString,
+}
+
+impl ActiveRequestGuard {
+    /// Increment the gauge and return a guard that decrements on drop.
+    pub(crate) fn acquire(listener: SharedString) -> Self {
+        if is_recorder_installed() {
+            gauge!(HTTP_ACTIVE_REQUESTS, "listener" => listener.clone()).increment(1.0);
+        }
+        Self { listener }
+    }
+}
+
+impl Drop for ActiveRequestGuard {
+    fn drop(&mut self) {
+        if is_recorder_installed() {
+            gauge!(HTTP_ACTIVE_REQUESTS, "listener" => self.listener.clone()).decrement(1.0);
+        }
+    }
+}
+
 /// Record an overload rejection.
 pub(crate) fn record_overload_reject(reason: &'static str) {
     if !is_recorder_installed() {
@@ -544,6 +580,25 @@ mod tests {
         record_config_reload_failure();
         clear_stale_upstream_health_gauges(["gone"], std::iter::empty::<&str>());
         let _guard = ActiveConnectionGuard::acquire(SharedString::const_str("test"));
+        let _request_guard = ActiveRequestGuard::acquire(SharedString::const_str("test"));
+    }
+
+    #[test]
+    fn active_request_guard_returns_to_zero_on_drop() {
+        install_prometheus_recorder();
+        let listener = SharedString::const_str("active-request-guard-listener");
+        let guard = ActiveRequestGuard::acquire(listener.clone());
+        let held = render_prometheus().expect("recorder should render");
+        assert!(
+            held.contains("praxis_http_active_requests{listener=\"active-request-guard-listener\"} 1"),
+            "gauge should read 1 while the guard is held:\n{held}"
+        );
+        drop(guard);
+        let released = render_prometheus().expect("recorder should render");
+        assert!(
+            released.contains("praxis_http_active_requests{listener=\"active-request-guard-listener\"} 0"),
+            "gauge should return to 0 once the guard drops:\n{released}"
+        );
     }
 
     #[test]

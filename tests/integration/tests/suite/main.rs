@@ -63,6 +63,7 @@ mod filter_metadata;
 mod guardrails;
 mod health_check;
 mod hot_reload;
+mod http_active_requests;
 mod ip_acl;
 mod iterative_request_router;
 mod json_body_field;

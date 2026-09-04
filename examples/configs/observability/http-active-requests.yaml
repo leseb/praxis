@@ -1,0 +1,38 @@
+# HTTP Active Requests
+#
+# Prometheus gauge for HTTP requests currently in flight per listener.
+# Incremented on admission and decremented when the request context is
+# dropped, so client aborts and reset streams are accounted for. Scraped
+# via the admin /metrics endpoint.
+#
+# Usage:
+#   cargo run -p praxis-proxy -- -c examples/configs/observability/http-active-requests.yaml
+#
+# Exercise:
+#   curl -s http://localhost:8080/
+#   curl -s http://localhost:9901/metrics | grep http_active_requests
+
+admin:
+  address: "127.0.0.1:9901"
+
+insecure_options:
+  allow_private_endpoints: true
+
+listeners:
+  - name: web
+    address: "127.0.0.1:8080"
+    filter_chains:
+      - routing
+
+filter_chains:
+  - name: routing
+    filters:
+      - filter: router
+        routes:
+          - path_prefix: "/"
+            cluster: backend
+      - filter: load_balancer
+        clusters:
+          - name: backend
+            endpoints:
+              - "127.0.0.1:3000"

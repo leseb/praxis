@@ -27,6 +27,7 @@ mod guardrails_per_model;
 mod header_manipulation;
 mod health_checks;
 mod hostname_upstream;
+mod http_active_requests;
 mod iterative_request_router_circuit_breaker;
 mod iterative_request_router_failover;
 mod iterative_request_router_origin_failover;
