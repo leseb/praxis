@@ -26,9 +26,9 @@ const TCP_BYTES_RECEIVED_TOTAL: &str = "praxis_tcp_bytes_received_total";
 
 /// Gauge for currently open TCP connections per listener.
 ///
-/// Unlike `praxis_connections_active`, which counts HTTP requests and TCP
-/// sessions under one name, this series carries only TCP connections, so
-/// the TCP metric family is queryable on its own.
+/// The HTTP counterpart is `praxis_http_active_requests`; each metric
+/// carries only its own protocol so the two families are queryable on
+/// their own.
 const TCP_ACTIVE_CONNECTIONS: &str = "praxis_tcp_active_connections";
 
 // -----------------------------------------------------------------------------
@@ -100,10 +100,9 @@ pub(crate) fn record_tcp_bytes(listener: SharedString, received: u64, sent: u64)
 
 /// RAII guard that decrements `praxis_tcp_active_connections` on drop.
 ///
-/// Acquired once per accepted TCP connection, alongside
-/// `ActiveConnectionGuard`. Every early-close path returns from the same
-/// session future, so the drop covers SNI timeouts, filter rejections and
-/// connect failures as well as completed sessions.
+/// Acquired once per accepted TCP connection. Every early-close path
+/// returns from the same session future, so the drop covers SNI timeouts,
+/// filter rejections and connect failures as well as completed sessions.
 ///
 /// Bind the guard to a named variable: `let _ = acquire(..)` drops it
 /// immediately and pins the gauge at zero.

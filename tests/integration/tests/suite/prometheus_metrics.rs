@@ -101,7 +101,7 @@ fn metrics_happy_path_emits_baseline_series_with_real_labels() {
         "praxis_http_request_duration_seconds",
         "praxis_http_request_body_bytes",
         "praxis_http_response_body_bytes",
-        "praxis_connections_active",
+        "praxis_http_active_requests",
         "praxis_upstream_connect_duration_seconds",
         "route=\"/api/*\"",
         "cluster=\"backend\"",
@@ -135,7 +135,7 @@ fn metrics_overload_rejects_listener_connections() {
     held.write_all(b"GET /api/ HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         .unwrap();
 
-    wait_for_metric(&admin, "praxis_connections_active", Duration::from_secs(2));
+    wait_for_metric(&admin, "praxis_http_active_requests", Duration::from_secs(2));
 
     let raw = http_send(
         proxy.addr(),

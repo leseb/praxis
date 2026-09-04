@@ -177,7 +177,6 @@ impl ProxyHttp for PingoraHttpHandler {
             }
         }
 
-        ctx._active_connection = Some(metrics::ActiveConnectionGuard::acquire(self.listener_name.clone()));
         ctx._active_request = Some(metrics::ActiveRequestGuard::acquire(self.listener_name.clone()));
 
         if let Some(timeout) = self.downstream_read_timeout {

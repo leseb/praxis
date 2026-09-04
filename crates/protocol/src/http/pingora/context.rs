@@ -171,9 +171,6 @@ pub struct PingoraRequestCtx {
     /// Matched route path-match pattern for the `route` metric label.
     pub metrics_route: Option<::metrics::SharedString>,
 
-    /// RAII guard that decrements `praxis_connections_active` on drop.
-    pub(crate) _active_connection: Option<crate::http::pingora::metrics::ActiveConnectionGuard>,
-
     /// First proxy error cause seen for this request, for the
     /// `praxis_errors_total` `type` label.
     ///
@@ -561,7 +558,6 @@ impl Default for PingoraRequestCtx {
             metrics_cluster_shared: None,
             metrics_route: None,
             error_type: None,
-            _active_connection: None,
             _active_request: None,
             upstream_connect_start: None,
             pre_read_body: None,

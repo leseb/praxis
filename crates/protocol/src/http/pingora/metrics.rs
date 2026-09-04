@@ -26,22 +26,12 @@ const HTTP_REQUEST_BODY_BYTES: &str = "praxis_http_request_body_bytes";
 /// Histogram for HTTP response body size in bytes.
 const HTTP_RESPONSE_BODY_BYTES: &str = "praxis_http_response_body_bytes";
 
-/// Gauge for concurrent in-flight proxy sessions per listener.
-///
-/// For HTTP, each active request holds a guard for its lifetime (so the
-/// series tracks in-flight requests more than raw TCP sockets). For TCP,
-/// each accepted connection holds a guard while the session is open.
-///
-/// When multiple TCP listeners share one Pingora service group, the
-/// `listener` label is resolved from the connection's local bind address
-/// (see TCP proxy listener-name map).
-const CONNECTIONS_ACTIVE: &str = "praxis_connections_active";
-
 /// Gauge for in-flight HTTP requests per listener.
 ///
-/// Unlike `praxis_connections_active`, which counts HTTP requests and TCP
-/// sessions under one name, this series carries only HTTP requests, so
-/// `sum()` over it is meaningful without knowing each listener's protocol.
+/// Each active request holds an RAII guard for its lifetime, so the
+/// decrement runs on every terminal path, including client aborts and
+/// reset HTTP/2 streams. TCP connections are tracked separately by
+/// `praxis_tcp_active_connections`.
 const HTTP_ACTIVE_REQUESTS: &str = "praxis_http_active_requests";
 
 /// Counter for connections rejected by overload protection.
@@ -443,60 +433,12 @@ pub(crate) fn record_body_size_metrics(
     record_body_size_all_labels(method, status_class, cluster, request_bytes, response_bytes);
 }
 
-/// Increment the active-connections gauge for a listener.
-pub(crate) fn inc_connections_active(listener: SharedString) {
-    if !is_recorder_installed() {
-        return;
-    }
-    if !metric_labels().is_enabled(MetricLabel::Listener) {
-        gauge!(CONNECTIONS_ACTIVE).increment(1.0);
-        return;
-    }
-    gauge!(CONNECTIONS_ACTIVE, "listener" => listener).increment(1.0);
-}
-
-/// Decrement the active-connections gauge for a listener.
-pub(crate) fn dec_connections_active(listener: SharedString) {
-    if !is_recorder_installed() {
-        return;
-    }
-    if !metric_labels().is_enabled(MetricLabel::Listener) {
-        gauge!(CONNECTIONS_ACTIVE).decrement(1.0);
-        return;
-    }
-    gauge!(CONNECTIONS_ACTIVE, "listener" => listener).decrement(1.0);
-}
-
-/// RAII guard that decrements `praxis_connections_active` on drop.
-///
-/// Acquired once per HTTP request / TCP session. See the
-/// `CONNECTIONS_ACTIVE` constant docs for HTTP vs TCP semantics and
-/// grouped TCP listener labeling.
-pub struct ActiveConnectionGuard {
-    /// Listener name label.
-    listener: SharedString,
-}
-
-impl ActiveConnectionGuard {
-    /// Increment the gauge and return a guard that decrements on drop.
-    pub(crate) fn acquire(listener: SharedString) -> Self {
-        inc_connections_active(listener.clone());
-        Self { listener }
-    }
-}
-
-impl Drop for ActiveConnectionGuard {
-    fn drop(&mut self) {
-        dec_connections_active(self.listener.clone());
-    }
-}
-
 /// RAII guard that decrements `praxis_http_active_requests` on drop.
 ///
-/// Acquired once per HTTP request, alongside [`ActiveConnectionGuard`].
-/// Pingora owns the request context by value, so the drop runs on every
-/// terminal path (including a client abort or an HTTP/2 stream reset,
-/// which skip the `logging` callback entirely).
+/// Acquired once per HTTP request. Pingora owns the request context by
+/// value, so the drop runs on every terminal path (including a client
+/// abort or an HTTP/2 stream reset, which skip the `logging` callback
+/// entirely).
 pub struct ActiveRequestGuard {
     /// Listener name label.
     listener: SharedString,
@@ -859,7 +801,6 @@ mod tests {
         record_config_reload_success();
         record_config_reload_failure();
         clear_stale_upstream_health_gauges(["gone"], std::iter::empty::<&str>());
-        let _guard = ActiveConnectionGuard::acquire(SharedString::const_str("test"));
         let _request_guard = ActiveRequestGuard::acquire(SharedString::const_str("test"));
     }
 

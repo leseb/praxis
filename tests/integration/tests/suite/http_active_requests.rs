@@ -12,14 +12,16 @@ use praxis_test_utils::{free_port, http_get, start_backend_with_shutdown, start_
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn gauge_value(body: &str, listener: &str) -> f64 {
+fn series_value(body: &str, metric: &str, listener: &str) -> f64 {
     body.lines()
-        .find(|line| {
-            line.starts_with("praxis_http_active_requests{") && line.contains(&format!("listener=\"{listener}\""))
-        })
+        .find(|line| line.starts_with(&format!("{metric}{{")) && line.contains(&format!("listener=\"{listener}\"")))
         .and_then(|line| line.split_whitespace().last())
         .and_then(|value| value.parse::<f64>().ok())
-        .unwrap_or_else(|| panic!("no praxis_http_active_requests series for listener {listener}:\n{body}"))
+        .unwrap_or_else(|| panic!("no {metric} series for listener {listener}:\n{body}"))
+}
+
+fn gauge_value(body: &str, listener: &str) -> f64 {
+    series_value(body, "praxis_http_active_requests", listener)
 }
 
 fn proxy_yaml(proxy_port: u16, admin_port: u16, backend_port: u16) -> String {

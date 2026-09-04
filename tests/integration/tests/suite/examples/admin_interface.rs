@@ -77,8 +77,8 @@ fn admin_interface_serves_health_and_metrics() {
         "/metrics should contain praxis_http_response_body_bytes: {metrics_body}"
     );
     assert!(
-        metrics_body.contains("praxis_connections_active"),
-        "/metrics should contain praxis_connections_active: {metrics_body}"
+        metrics_body.contains("praxis_http_active_requests"),
+        "/metrics should contain praxis_http_active_requests: {metrics_body}"
     );
     assert!(
         metrics_body.contains("praxis_upstream_connect_duration_seconds"),

@@ -180,9 +180,9 @@ decrement is tied to the request context's lifetime,
 so it also fires when a client aborts mid-body or an
 HTTP/2 stream is reset.
 
-Unlike `praxis_connections_active`, which counts HTTP
-requests and TCP sessions under one name, this series
-carries only HTTP requests.
+This series carries only HTTP requests; TCP
+connections are tracked separately by
+`praxis_tcp_active_connections`.
 
 ### Error Metrics
 
@@ -289,7 +289,7 @@ Total accepted TCP connections.
 
 Incremented once per accepted connection after
 overload checks pass. Use with
-`praxis_connections_active` to derive connection
+`praxis_tcp_active_connections` to derive connection
 rates and concurrency.
 
 #### `praxis_tcp_bytes_sent_total` / `praxis_tcp_bytes_received_total` (counters)
@@ -325,9 +325,9 @@ accepted and do not appear here. Early closes (SNI
 timeout, filter rejection, connect failure) decrement
 the gauge on the same path they log on.
 
-Unlike `praxis_connections_active`, which counts HTTP
-requests and TCP sessions under one name, this series
-carries only TCP connections.
+This series carries only TCP connections; HTTP
+requests are tracked separately by
+`praxis_http_active_requests`.
 
 ### Metric Label Sets
 
