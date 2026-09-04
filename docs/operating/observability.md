@@ -231,6 +231,24 @@ overload checks pass. Use with
 `praxis_connections_active` to derive connection
 rates and concurrency.
 
+#### `praxis_tcp_active_connections` (gauge)
+
+TCP connections currently open, incremented on accept
+and decremented when the session ends.
+
+| Label | Values |
+| ---------- | ---------------------------------------- |
+| `listener` | Listener name from config |
+
+Connections rejected by overload protection are never
+accepted and do not appear here. Early closes (SNI
+timeout, filter rejection, connect failure) decrement
+the gauge on the same path they log on.
+
+Unlike `praxis_connections_active`, which counts HTTP
+requests and TCP sessions under one name, this series
+carries only TCP connections.
+
 ### Filter Duration Histograms
 
 Per-filter hook timing is opt-in. Enable it in the

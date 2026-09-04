@@ -319,6 +319,7 @@ impl ServerApp for PingoraTcpProxy {
             let listener_label = self.listener_label_for(&local_addr);
             let _active_connection =
                 crate::http::pingora::metrics::ActiveConnectionGuard::acquire(listener_label.clone());
+            let _active_tcp_connection = super::metrics::TcpActiveConnectionGuard::acquire(listener_label.clone());
             super::metrics::record_tcp_connection_accepted(listener_label);
 
             info!("connection_accepted");

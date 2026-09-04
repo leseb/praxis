@@ -13,7 +13,7 @@ use tokio::sync::{Semaphore, watch};
 
 use crate::{ListenerPipelines, Protocol};
 
-/// TCP connection metrics (Prometheus counters and histograms).
+/// TCP connection metrics (Prometheus counters, gauges and histograms).
 pub(crate) mod metrics;
 /// Bidirectional TCP proxy application.
 pub(crate) mod proxy;

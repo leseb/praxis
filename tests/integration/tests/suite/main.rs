@@ -82,6 +82,7 @@ mod sni_router;
 mod stream_buffer_adapter;
 mod streaming_terminal_response;
 mod tcp_access_log;
+mod tcp_active_connections;
 mod tcp_connection_metrics;
 mod tcp_connections_total;
 mod tcp_edge_cases;
