@@ -474,6 +474,10 @@ fn emit_request_metrics(session: &Session, ctx: &PingoraRequestCtx) {
 
     emit_upstream_request_metric(ctx, &cluster);
 
+    if let Some(error_type) = ctx.error_type {
+        metrics::record_error(error_type);
+    }
+
     let duration_secs = ctx.request_start.elapsed().as_secs_f64();
     metrics::record_request_metrics(labels, duration_secs);
     metrics::record_body_size_metrics(

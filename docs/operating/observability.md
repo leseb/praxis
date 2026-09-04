@@ -184,6 +184,43 @@ Unlike `praxis_connections_active`, which counts HTTP
 requests and TCP sessions under one name, this series
 carries only HTTP requests.
 
+### Error Metrics
+
+#### `praxis_errors_total` (counter)
+
+Proxy errors, classified by cause.
+
+| Label | Values |
+| ------ | ---------------------------------------- |
+| `type` | `filter_reject`, `timeout`, `upstream_unavailable`, `upstream_protocol`, `downstream`, `internal` |
+
+| Type | Meaning |
+| ---------------------- | ---------------------------------------- |
+| `filter_reject` | A filter or a request-body limit rejected the request |
+| `timeout` | An upstream connect, read or write timed out |
+| `upstream_unavailable` | The upstream could not be reached |
+| `upstream_protocol` | The upstream was reached but the exchange failed |
+| `downstream` | The client connection failed |
+| `internal` | An internal proxy fault |
+
+The error type is classified at the sites that
+terminate a request (the terminal failure hook and
+the request- and body-filter rejection paths) and
+recorded first-write-wins on the request context. The
+counter is incremented once per request, from the same
+hook that records `praxis_http_requests_total`, so a
+request that fails and retries counts once rather than
+once per attempt.
+
+Overload rejections are counted by
+`praxis_overload_rejects_total` and are not repeated
+here. Connect failures do appear under
+`upstream_unavailable` as well as in
+`praxis_upstream_connect_failures_total`, so this
+counter stands on its own as an error denominator
+rather than needing the connect-failure counter added
+in.
+
 ### Upstream Metrics
 
 #### `praxis_upstream_requests_total` (counter)

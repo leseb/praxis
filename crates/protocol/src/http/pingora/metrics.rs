@@ -73,6 +73,27 @@ const CONFIG_RELOAD_TOTAL: &str = "praxis_config_reload_total";
 /// Gauge for unix timestamp of last successful config reload.
 const CONFIG_RELOAD_LAST_SUCCESS_TIMESTAMP: &str = "praxis_config_reload_last_success_timestamp";
 
+/// Counter for proxy errors not already counted by a dedicated metric.
+const ERRORS_TOTAL: &str = "praxis_errors_total";
+
+/// Error type: a filter rejected the request.
+pub(crate) const ERROR_TYPE_FILTER_REJECT: &str = "filter_reject";
+
+/// Error type: an upstream connect, read or write timed out.
+pub(crate) const ERROR_TYPE_TIMEOUT: &str = "timeout";
+
+/// Error type: the upstream could not be reached.
+pub(crate) const ERROR_TYPE_UPSTREAM_UNAVAILABLE: &str = "upstream_unavailable";
+
+/// Error type: the upstream was reached but the exchange failed.
+pub(crate) const ERROR_TYPE_UPSTREAM_PROTOCOL: &str = "upstream_protocol";
+
+/// Error type: the downstream client connection failed.
+pub(crate) const ERROR_TYPE_DOWNSTREAM: &str = "downstream";
+
+/// Error type: an internal proxy fault.
+pub(crate) const ERROR_TYPE_INTERNAL: &str = "internal";
+
 /// Overload reject reason: process memory pressure.
 pub(crate) const OVERLOAD_REASON_MEMORY: &str = "memory";
 
@@ -370,6 +391,61 @@ impl Drop for ActiveRequestGuard {
     }
 }
 
+/// Record a proxy error.
+///
+/// Counted once per request, from the logging hook. Overload rejections and
+/// upstream connect failures have dedicated counters and are not repeated
+/// here; this counter covers the causes those miss.
+pub(crate) fn record_error(error_type: &'static str) {
+    if !is_recorder_installed() {
+        return;
+    }
+    counter!(ERRORS_TOTAL, "type" => error_type).increment(1);
+}
+
+/// Classify a Pingora error into a bounded `type` label value.
+///
+/// Connect failures map to `upstream_unavailable` and are also counted by
+/// `praxis_upstream_connect_failures_total`; the overlap is deliberate so
+/// that `praxis_errors_total` is a complete error denominator on its own.
+pub(crate) fn error_type_for(etype: &::pingora_core::ErrorType, source: &::pingora_core::ErrorSource) -> &'static str {
+    use ::pingora_core::ErrorSource::{Downstream, Internal, Unset};
+
+    if matches!(source, Downstream) {
+        return ERROR_TYPE_DOWNSTREAM;
+    }
+    if is_timeout(etype) {
+        return ERROR_TYPE_TIMEOUT;
+    }
+    if is_unreachable(etype) {
+        return ERROR_TYPE_UPSTREAM_UNAVAILABLE;
+    }
+    if matches!(source, Internal | Unset) {
+        return ERROR_TYPE_INTERNAL;
+    }
+    ERROR_TYPE_UPSTREAM_PROTOCOL
+}
+
+/// Whether the error is a connect, handshake, read or write timeout.
+fn is_timeout(etype: &::pingora_core::ErrorType) -> bool {
+    use ::pingora_core::ErrorType::{ConnectTimedout, ReadTimedout, TLSHandshakeTimedout, WriteTimedout};
+
+    matches!(
+        etype,
+        ConnectTimedout | TLSHandshakeTimedout | ReadTimedout | WriteTimedout
+    )
+}
+
+/// Whether the error means the upstream was never reached.
+fn is_unreachable(etype: &::pingora_core::ErrorType) -> bool {
+    use ::pingora_core::ErrorType::{BindError, ConnectError, ConnectNoRoute, ConnectRefused, SocketError};
+
+    matches!(
+        etype,
+        ConnectRefused | ConnectNoRoute | ConnectError | BindError | SocketError
+    )
+}
+
 /// Record an overload rejection.
 pub(crate) fn record_overload_reject(reason: &'static str) {
     if !is_recorder_installed() {
@@ -594,6 +670,7 @@ mod tests {
         // Must not panic when the Prometheus recorder is absent.
         record_overload_reject(OVERLOAD_REASON_MEMORY);
         record_upstream_connect_failure(cluster_none());
+        record_error(ERROR_TYPE_INTERNAL);
         record_upstream_request(cluster_none(), SharedString::const_str("10.0.0.1:80"), "2xx");
         record_upstream_retry(cluster_none(), RETRY_RESULT_SUCCESS);
         record_upstream_connect_duration(cluster_none(), 0.01);
@@ -655,6 +732,55 @@ mod tests {
                 "praxis_upstream_requests_total{cluster=\"api\",endpoint=\"10.0.0.7:8080\",status_class=\"5xx\"} 1"
             ),
             "counter should carry all three labels:\n{body}"
+        );
+    }
+
+    #[test]
+    fn error_types_appear_in_scrape() {
+        install_prometheus_recorder();
+        for error_type in [
+            ERROR_TYPE_FILTER_REJECT,
+            ERROR_TYPE_TIMEOUT,
+            ERROR_TYPE_UPSTREAM_UNAVAILABLE,
+            ERROR_TYPE_UPSTREAM_PROTOCOL,
+            ERROR_TYPE_DOWNSTREAM,
+            ERROR_TYPE_INTERNAL,
+        ] {
+            record_error(error_type);
+            let body = render_prometheus().expect("recorder should render");
+            let needle = format!("praxis_errors_total{{type=\"{error_type}\"}}");
+            assert!(body.contains(&needle), "expected `{needle}` in scrape:\n{body}");
+        }
+    }
+
+    #[test]
+    fn error_type_for_maps_pingora_errors_to_bounded_values() {
+        use ::pingora_core::{ErrorSource, ErrorType};
+
+        assert_eq!(
+            error_type_for(&ErrorType::ConnectTimedout, &ErrorSource::Upstream),
+            ERROR_TYPE_TIMEOUT,
+            "connect timeout is a timeout"
+        );
+        assert_eq!(
+            error_type_for(&ErrorType::ConnectRefused, &ErrorSource::Upstream),
+            ERROR_TYPE_UPSTREAM_UNAVAILABLE,
+            "a refused connect means the upstream was unreachable"
+        );
+        assert_eq!(
+            error_type_for(&ErrorType::ReadError, &ErrorSource::Upstream),
+            ERROR_TYPE_UPSTREAM_PROTOCOL,
+            "a mid-exchange read error is a protocol failure"
+        );
+        assert_eq!(
+            error_type_for(&ErrorType::ReadTimedout, &ErrorSource::Downstream),
+            ERROR_TYPE_DOWNSTREAM,
+            "downstream source wins over the error kind"
+        );
+        assert_eq!(
+            error_type_for(&ErrorType::InternalError, &ErrorSource::Internal),
+            ERROR_TYPE_INTERNAL,
+            "internal source is an internal fault"
         );
     }
 

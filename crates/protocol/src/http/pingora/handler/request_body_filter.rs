@@ -63,6 +63,7 @@ pub(super) async fn execute(
     match ctx.request_body_mode {
         BodyMode::SizeLimit { max_bytes } => {
             if check_body_size_limit(body.as_ref(), &mut ctx.request_body_bytes, max_bytes) {
+                ctx.stamp_error_type(crate::http::pingora::metrics::ERROR_TYPE_FILTER_REJECT);
                 send_rejection(session, Rejection::status(413)).await;
                 return Err(pingora_core::Error::explain(
                     pingora_core::ErrorType::HTTPStatus(413),
@@ -74,6 +75,7 @@ pub(super) async fn execute(
 
         BodyMode::StreamBuffer { max_bytes } if !ctx.request_body_released => {
             if accumulate_stream_buffer(body, &mut ctx.request_body_buffer, end_of_stream, max_bytes) {
+                ctx.stamp_error_type(crate::http::pingora::metrics::ERROR_TYPE_FILTER_REJECT);
                 send_rejection(session, Rejection::status(413)).await;
                 return Err(pingora_core::Error::explain(
                     pingora_core::ErrorType::HTTPStatus(413),
@@ -98,6 +100,7 @@ pub(super) async fn execute(
             if let Some(max) = pipeline.request_body_ceiling()
                 && ctx.request_body_bytes.saturating_add(chunk_len) > max as u64
             {
+                ctx.stamp_error_type(crate::http::pingora::metrics::ERROR_TYPE_FILTER_REJECT);
                 send_rejection(session, Rejection::status(413)).await;
                 return Err(pingora_core::Error::explain(
                     pingora_core::ErrorType::HTTPStatus(413),
@@ -145,6 +148,7 @@ pub(super) async fn execute(
         },
         Ok(FilterAction::Reject(rejection)) => {
             let status = rejection.status;
+            ctx.stamp_error_type(crate::http::pingora::metrics::ERROR_TYPE_FILTER_REJECT);
             send_rejection(session, rejection).await;
             Err(pingora_core::Error::explain(
                 pingora_core::ErrorType::HTTPStatus(status),
@@ -153,6 +157,7 @@ pub(super) async fn execute(
         },
         Err(e) => {
             error!(error = %e, "filter pipeline error during request body");
+            ctx.stamp_error_type(crate::http::pingora::metrics::ERROR_TYPE_INTERNAL);
             send_rejection(session, Rejection::status(500)).await;
             Err(pingora_core::Error::explain(
                 pingora_core::ErrorType::InternalError,

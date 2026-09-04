@@ -174,6 +174,14 @@ pub struct PingoraRequestCtx {
     /// RAII guard that decrements `praxis_connections_active` on drop.
     pub(crate) _active_connection: Option<crate::http::pingora::metrics::ActiveConnectionGuard>,
 
+    /// First proxy error cause seen for this request, for the
+    /// `praxis_errors_total` `type` label.
+    ///
+    /// Stamped first-cause-wins: one failing request can traverse several
+    /// classification sites across a retry fan-out, so the counter is
+    /// incremented once from the logging hook rather than at each site.
+    pub(crate) error_type: Option<&'static str>,
+
     /// RAII guard that decrements `praxis_http_active_requests` on drop.
     pub(crate) _active_request: Option<crate::http::pingora::metrics::ActiveRequestGuard>,
 
@@ -496,6 +504,15 @@ impl PingoraRequestCtx {
         pipeline
     }
 
+    /// Record the first proxy error cause seen for this request.
+    ///
+    /// Later causes are ignored: a single failing request can pass through
+    /// several classification sites (connect failure, retry, final proxy
+    /// error), and the counter must reflect the root cause once.
+    pub(crate) fn stamp_error_type(&mut self, error_type: &'static str) {
+        self.error_type.get_or_insert(error_type);
+    }
+
     /// Return the pinned pipeline, falling back to a fresh
     /// [`ArcSwap`] load when no pipeline was pinned.
     ///
@@ -543,6 +560,7 @@ impl Default for PingoraRequestCtx {
             metrics_cluster: None,
             metrics_cluster_shared: None,
             metrics_route: None,
+            error_type: None,
             _active_connection: None,
             _active_request: None,
             upstream_connect_start: None,
@@ -937,6 +955,30 @@ mod tests {
             Arc::ptr_eq(ctx.pinned_pipeline.as_ref().unwrap(), &pipeline_a),
             "pinned_pipeline should be stored in ctx"
         );
+    }
+
+    #[test]
+    fn stamp_error_type_is_first_write_wins() {
+        // A single request can pass through more than one classification
+        // site (for example a request-filter reject followed by the
+        // terminal fail_to_proxy hook). The first stamp must win so the
+        // recorded cause is stable; the once-per-request increment in the
+        // logging hook is what keeps one error from being multiplied across
+        // a retry fan-out.
+        let mut ctx = PingoraRequestCtx::default();
+        ctx.stamp_error_type(crate::http::pingora::metrics::ERROR_TYPE_FILTER_REJECT);
+        ctx.stamp_error_type(crate::http::pingora::metrics::ERROR_TYPE_INTERNAL);
+        assert_eq!(
+            ctx.error_type,
+            Some(crate::http::pingora::metrics::ERROR_TYPE_FILTER_REJECT),
+            "the first classification wins; a later site must not overwrite it"
+        );
+    }
+
+    #[test]
+    fn error_type_is_unset_until_stamped() {
+        let ctx = PingoraRequestCtx::default();
+        assert_eq!(ctx.error_type, None, "a fresh context carries no error cause");
     }
 
     #[test]

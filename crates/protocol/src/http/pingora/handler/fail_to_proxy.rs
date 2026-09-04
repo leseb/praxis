@@ -45,10 +45,14 @@ pub(super) async fn execute(
 ) -> FailToProxy {
     let etype = e.etype().clone();
     let pending_rejection = ctx.pending_rejection.take();
+    if !matches!(etype, ErrorType::HTTPStatus(_)) {
+        ctx.stamp_error_type(crate::http::pingora::metrics::error_type_for(&etype, e.esource()));
+    }
     let formatter = ctx.extensions.get::<ErrorResponseFormatterHandle>();
 
     if let ErrorType::HTTPStatus(code) = etype {
         if let Some(rejection) = pending_rejection {
+            ctx.stamp_error_type(crate::http::pingora::metrics::ERROR_TYPE_FILTER_REJECT);
             return handle_pending_rejection(session, code, rejection).await;
         }
         return handle_http_status(session, code, formatter).await;

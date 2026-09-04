@@ -188,6 +188,7 @@ pub(in crate::http) async fn execute(
             action: FilterAction::Reject(rejection),
             ..
         }) => {
+            ctx.stamp_error_type(crate::http::pingora::metrics::ERROR_TYPE_FILTER_REJECT);
             send_rejection(session, rejection).await;
             Ok(true)
         },
@@ -207,6 +208,7 @@ pub(in crate::http) async fn execute(
         },
         Err(e) => {
             error!(error = %e, "filter pipeline error");
+            ctx.stamp_error_type(crate::http::pingora::metrics::ERROR_TYPE_INTERNAL);
             send_rejection(session, Rejection::status(500)).await;
             Ok(true)
         },
