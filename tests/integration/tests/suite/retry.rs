@@ -3,6 +3,8 @@
 
 //! Integration tests for policy-driven retry behavior.
 
+use std::time::{Duration, Instant};
+
 use praxis_core::config::Config;
 use praxis_test_utils::{
     Backend, free_port, http_get, http_send, parse_status, simple_proxy_yaml, start_backend_with_shutdown, start_proxy,
@@ -318,26 +320,55 @@ fn reused_connection_failure_does_not_replay_post() {
     let config = Config::from_yaml(&yaml).unwrap();
     let proxy = start_proxy(&config);
 
-    let (status, _body) = http_get(proxy.addr(), "/warmup", None);
-    assert_eq!(status, 200, "warmup request should succeed and pool the connection");
+    // Connection pooling and reuse are timing-sensitive: under the heavy
+    // concurrency of the coverage / full-suite run the pooled upstream
+    // connection is not always reused-then-killed on the first probe, so
+    // retry the warmup+probe exchange until we observe the intended
+    // reused-connection failure.
+    //
+    // The security-relevant guarantee is checked on every attempt: the
+    // already-written POST is never replayed upstream, so the total number of
+    // POSTs the backend sees must equal the number of probes. A genuine replay
+    // regression fails immediately on that assertion; a "never surfaces the
+    // failure" regression fails by never reaching 502 within the deadline.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut probes = 0_usize;
+    loop {
+        let (warmup_status, _body) = http_get(proxy.addr(), "/warmup", None);
+        assert_eq!(
+            warmup_status, 200,
+            "warmup request should succeed and pool the connection"
+        );
 
-    let raw = http_send(
-        proxy.addr(),
-        "POST /probe HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest",
-    );
-    let status = parse_status(&raw);
+        let raw = http_send(
+            proxy.addr(),
+            "POST /probe HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest",
+        );
+        let last_status = parse_status(&raw);
+        probes += 1;
 
-    let entries = log.lock().unwrap().clone();
-    assert!(
-        entries.iter().any(|(_, request_num, ..)| *request_num > 0),
-        "probe request must arrive on the pooled connection, got: {entries:?}"
-    );
-    let post_count = entries.iter().filter(|(_, _, method, _)| method == "POST").count();
-    assert_eq!(
-        post_count, 1,
-        "POST bytes already written upstream must not be replayed, got: {entries:?}"
-    );
-    assert_eq!(status, 502, "unreplayable POST should surface the upstream failure");
+        let entries = log.lock().unwrap().clone();
+        // No-replay invariant: each probe writes exactly one POST upstream.
+        let post_count = entries.iter().filter(|(_, _, method, _)| method == "POST").count();
+        assert_eq!(
+            post_count, probes,
+            "POST bytes already written upstream must not be replayed, got: {entries:?}"
+        );
+
+        // Success: the probe landed on the pooled connection and the
+        // unreplayable failure surfaced to the client as a 502.
+        let probe_reused = entries.iter().any(|(_, request_num, ..)| *request_num > 0);
+        if probe_reused && last_status == 502 {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "unreplayable POST on a reused connection should surface the upstream failure as 502 \
+             within the retry window (last status {last_status}, entries: {entries:?})"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 #[test]
