@@ -89,6 +89,7 @@ mod tcp_connections_total;
 mod tcp_edge_cases;
 mod tcp_load_balancer;
 mod tls;
+mod upstream_requests_total;
 mod url_rewrite;
 mod via;
 mod websocket;

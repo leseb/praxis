@@ -47,6 +47,7 @@ page.
 | [tcp-connections-total.yaml](configs/observability/tcp-connections-total.yaml) | Prometheus counter for total accepted TCP connections per listener |
 | [trace-context.yaml](configs/observability/trace-context.yaml) | W3C Trace Context header propagation |
 | [tracing-otlp.yaml](configs/observability/tracing-otlp.yaml) | Exports distributed tracing spans to an OpenTelemetry Collector via OTLP/gRPC |
+| [upstream-requests-total.yaml](configs/observability/upstream-requests-total.yaml) | Prometheus counter for requests that reached an upstream endpoint, labeled by cluster, endpoint and status class |
 
 ### Operations
 

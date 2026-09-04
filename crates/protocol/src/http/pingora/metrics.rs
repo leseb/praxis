@@ -46,6 +46,9 @@ const HTTP_ACTIVE_REQUESTS: &str = "praxis_http_active_requests";
 /// Counter for connections rejected by overload protection.
 const OVERLOAD_REJECTS_TOTAL: &str = "praxis_overload_rejects_total";
 
+/// Counter for requests sent to upstream endpoints.
+const UPSTREAM_REQUESTS_TOTAL: &str = "praxis_upstream_requests_total";
+
 /// Histogram for upstream connect duration in seconds.
 const UPSTREAM_CONNECT_DURATION_SECONDS: &str = "praxis_upstream_connect_duration_seconds";
 
@@ -383,6 +386,25 @@ pub(crate) fn record_upstream_connect_duration(cluster: SharedString, duration_s
     histogram!(UPSTREAM_CONNECT_DURATION_SECONDS, "cluster" => cluster).record(duration_secs);
 }
 
+/// Record a request that reached an upstream endpoint.
+///
+/// Counted once per request, from the logging hook, so a request retried
+/// across endpoints increments once against the endpoint that answered
+/// rather than once per attempt. Requests that never reached an upstream
+/// (filter rejections, connect failures) are not counted here.
+pub(crate) fn record_upstream_request(cluster: SharedString, endpoint: SharedString, status_class: &'static str) {
+    if !is_recorder_installed() {
+        return;
+    }
+    counter!(
+        UPSTREAM_REQUESTS_TOTAL,
+        "cluster" => cluster,
+        "endpoint" => endpoint,
+        "status_class" => status_class
+    )
+    .increment(1);
+}
+
 /// Record an upstream connect failure.
 pub(crate) fn record_upstream_connect_failure(cluster: SharedString) {
     if !is_recorder_installed() {
@@ -572,6 +594,7 @@ mod tests {
         // Must not panic when the Prometheus recorder is absent.
         record_overload_reject(OVERLOAD_REASON_MEMORY);
         record_upstream_connect_failure(cluster_none());
+        record_upstream_request(cluster_none(), SharedString::const_str("10.0.0.1:80"), "2xx");
         record_upstream_retry(cluster_none(), RETRY_RESULT_SUCCESS);
         record_upstream_connect_duration(cluster_none(), 0.01);
         set_upstream_endpoint_gauges(cluster_none(), 1, 2);
@@ -616,6 +639,23 @@ mod tests {
             let needle = format!("praxis_overload_rejects_total{{reason=\"{reason}\"}}");
             assert!(body.contains(&needle), "expected `{needle}` in scrape:\n{body}");
         }
+    }
+
+    #[test]
+    fn upstream_requests_carry_cluster_endpoint_and_status_class() {
+        install_prometheus_recorder();
+        record_upstream_request(
+            SharedString::const_str("api"),
+            SharedString::const_str("10.0.0.7:8080"),
+            "5xx",
+        );
+        let body = render_prometheus().expect("recorder should render");
+        assert!(
+            body.contains(
+                "praxis_upstream_requests_total{cluster=\"api\",endpoint=\"10.0.0.7:8080\",status_class=\"5xx\"} 1"
+            ),
+            "counter should carry all three labels:\n{body}"
+        );
     }
 
     #[test]

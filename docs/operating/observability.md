@@ -184,6 +184,30 @@ Unlike `praxis_connections_active`, which counts HTTP
 requests and TCP sessions under one name, this series
 carries only HTTP requests.
 
+### Upstream Metrics
+
+#### `praxis_upstream_requests_total` (counter)
+
+Requests that reached an upstream endpoint.
+
+| Label | Values |
+| -------------- | ---------------------------------------- |
+| `cluster` | Cluster name or `"none"` |
+| `endpoint` | Configured upstream address (`host:port`) |
+| `status_class` | `1xx`, `2xx`, `3xx`, `4xx`, `5xx`, `unknown` |
+
+Counted once per request, so a request retried across
+endpoints increments once, against the endpoint that
+answered. Requests that never reached an upstream
+(filter rejections, connect failures) are absent
+here but still counted by
+`praxis_http_requests_total`, so the difference
+between the two is proxy-generated responses.
+
+The `endpoint` label is the address as configured,
+not the resolved peer, so its cardinality is bounded
+by the config rather than by DNS.
+
 ### TCP Connection Metrics
 
 These are recorded automatically for every TCP
