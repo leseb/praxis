@@ -177,18 +177,26 @@ to close, in seconds.
 | Label | Values |
 | ---------- | ---------------------------------------- |
 | `listener` | Listener name from config |
-| `reason` | `completed`, `sni_timeout`, `filter_rejection`, `connect_failure`, `peeked_write_error` |
+| `reason` | `completed`, `error`, `shutdown`, `session_timeout`, `max_duration`, `sni_timeout`, `filter_rejection`, `connect_failure`, `peeked_write_error` |
 
 The `reason` label captures why the connection
 closed:
 
 | Reason | Meaning |
 | --------------------- | ---------------------------------------- |
-| `completed` | Normal forwarding finished |
+| `completed` | Normal forwarding finished (both directions saw EOF) |
+| `error` | Forwarding stopped on an I/O error |
+| `shutdown` | The server shut down while forwarding |
+| `session_timeout` | The idle `session_timeout` elapsed |
+| `max_duration` | The overall `max_duration` elapsed and the session was force-closed |
 | `sni_timeout` | SNI peek timed out before routing |
 | `filter_rejection` | Connect filters rejected the connection |
 | `connect_failure` | Upstream connection failed |
 | `peeked_write_error` | Writing peeked bytes to upstream failed |
+
+The first five reasons are reported after the
+forwarding phase; the last four are early closes that
+never reached forwarding.
 
 #### `praxis_tcp_connections_total` (counter)
 

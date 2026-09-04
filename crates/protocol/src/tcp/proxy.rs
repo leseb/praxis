@@ -459,7 +459,7 @@ impl ServerApp for PingoraTcpProxy {
             );
             super::metrics::record_tcp_connection_duration(
                 self.listener_label_for(&local_addr),
-                "completed",
+                close_reason.as_str(),
                 connect_time.elapsed().as_secs_f64(),
             );
 

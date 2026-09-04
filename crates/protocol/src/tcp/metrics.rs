@@ -34,8 +34,11 @@ pub(crate) fn record_tcp_connection_accepted(listener: SharedString) {
 
 /// Record TCP connection duration for a closed connection.
 ///
-/// The `reason` label captures the disconnect cause (e.g. `completed`,
-/// `sni_timeout`, `filter_rejection`, `connect_failure`, `peeked_write_error`).
+/// The `reason` label captures the disconnect cause. Sessions that reached
+/// the forwarding phase report the `TcpCloseReason` they ended on
+/// (`completed`, `error`, `shutdown`, `session_timeout`, `max_duration`);
+/// early closes report `sni_timeout`, `filter_rejection`, `connect_failure`
+/// or `peeked_write_error`.
 ///
 /// No-op when the Prometheus recorder has not been installed
 /// (i.e. when the admin interface is disabled).
@@ -56,6 +59,8 @@ pub(crate) fn record_tcp_connection_duration(listener: SharedString, reason: &'s
 // -----------------------------------------------------------------------------
 
 #[cfg(test)]
+#[expect(clippy::allow_attributes, reason = "blanket test suppressions")]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, reason = "tests")]
 mod tests {
     use super::*;
 
@@ -77,5 +82,21 @@ mod tests {
     #[test]
     fn record_large_duration_does_not_panic() {
         record_tcp_connection_duration(SharedString::const_str("long-lived"), "completed", 86400.0);
+    }
+
+    #[test]
+    fn forwarding_phase_reasons_appear_in_scrape() {
+        crate::http::pingora::metrics::install_prometheus_recorder();
+        for reason in ["error", "shutdown", "session_timeout", "max_duration"] {
+            record_tcp_connection_duration(SharedString::const_str("reason-listener"), reason, 0.5);
+        }
+        let body = crate::http::pingora::metrics::render_prometheus().expect("recorder should render");
+        for reason in ["error", "shutdown", "session_timeout", "max_duration"] {
+            let needle = format!("reason=\"{reason}\"");
+            assert!(
+                body.contains(&needle),
+                "expected `{needle}` in scrape; forwarding-phase close reasons must not collapse to `completed`:\n{body}"
+            );
+        }
     }
 }
