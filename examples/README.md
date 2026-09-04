@@ -41,6 +41,7 @@ page.
 | [http-active-requests.yaml](configs/observability/http-active-requests.yaml) | Prometheus gauge for HTTP requests currently in flight per listener |
 | [logging.yaml](configs/observability/logging.yaml) | request_id — ensures every request has a correlation ID |
 | [process-logging.yaml](configs/observability/process-logging.yaml) | Non-blocking process logs written to a file |
+| [route-templates.yaml](configs/observability/route-templates.yaml) | Collapses dynamic path segments in the Prometheus route label into stable templates, so high-variety URLs share one series instead of widening cardinality |
 | [tcp-access-log.yaml](configs/observability/tcp-access-log.yaml) | Structured JSON logging of TCP connection events (connect and disconnect) |
 | [tcp-active-connections.yaml](configs/observability/tcp-active-connections.yaml) | Prometheus gauge for TCP connections currently open per listener |
 | [tcp-byte-counters.yaml](configs/observability/tcp-byte-counters.yaml) | Prometheus counters for bytes forwarded over TCP connections in each direction, labeled by listener |

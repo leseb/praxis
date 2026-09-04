@@ -114,6 +114,7 @@ impl FilterPipeline {
             session_stores: None,
             pipeline_extensions: Vec::new(),
             record_filter_duration_metrics: false,
+            route_templates: Arc::default(),
             subrequest_client: None,
             may_select_streaming_subrequest_response,
             time_source: Arc::clone(&time_source),

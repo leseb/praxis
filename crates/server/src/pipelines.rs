@@ -164,6 +164,9 @@ fn configure_pipeline(
         config.insecure_options.allow_unbounded_body,
     )?;
     pipeline.set_record_filter_duration_metrics(config.metrics.filter_duration);
+    pipeline.set_route_templates(Arc::new(praxis_core::config::RouteTemplates::compile(
+        &config.metrics.route_templates,
+    )));
     if !health_registry.is_empty() {
         pipeline.set_health_registry(Arc::clone(health_registry));
     }

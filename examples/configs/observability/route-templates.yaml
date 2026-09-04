@@ -1,0 +1,44 @@
+# Route Label Templating
+#
+# Collapses dynamic path segments in the Prometheus route label into stable
+# templates, so high-variety URLs share one series instead of widening
+# cardinality. More precise than a prefix route, still bounded. Scraped via
+# the admin /metrics endpoint.
+#
+# Usage:
+#   cargo run -p praxis-proxy -- -c examples/configs/observability/route-templates.yaml
+#
+# Exercise:
+#   curl -s http://localhost:8080/users/42/orders
+#   curl -s http://localhost:8080/users/99/orders
+#   curl -s http://localhost:9901/metrics | grep 'route="/users'
+
+admin:
+  address: "127.0.0.1:9901"
+
+metrics:
+  route_templates:
+    - "/users/{id}"
+    - "/users/{id}/orders"
+
+insecure_options:
+  allow_private_endpoints: true
+
+listeners:
+  - name: web
+    address: "127.0.0.1:8080"
+    filter_chains:
+      - routing
+
+filter_chains:
+  - name: routing
+    filters:
+      - filter: router
+        routes:
+          - path_prefix: "/"
+            cluster: backend
+      - filter: load_balancer
+        clusters:
+          - name: backend
+            endpoints:
+              - "127.0.0.1:3000"

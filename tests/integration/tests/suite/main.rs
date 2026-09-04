@@ -77,6 +77,7 @@ mod process_logging;
 mod prometheus_metrics;
 mod rate_limit;
 mod retry;
+mod route_templates;
 mod routing;
 mod security;
 mod sni_router;

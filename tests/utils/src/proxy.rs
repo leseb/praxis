@@ -113,6 +113,9 @@ fn resolve_listener_pipeline(config: &Config, listener: &Listener, registry: &Fi
         )
         .unwrap();
     pipeline.set_record_filter_duration_metrics(config.metrics.filter_duration);
+    pipeline.set_route_templates(Arc::new(praxis_core::config::RouteTemplates::compile(
+        &config.metrics.route_templates,
+    )));
     Arc::new(pipeline)
 }
 

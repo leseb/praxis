@@ -313,7 +313,10 @@ async fn run_pipeline(
     ctx.structured_metadata = structured_metadata;
     ctx.metrics_cluster_shared = cluster.as_ref().map(|c| ::metrics::SharedString::from(Arc::clone(c)));
     ctx.metrics_cluster.clone_from(&cluster);
-    ctx.metrics_route = metrics_route;
+    // Templating runs here, at the single point where the route label is
+    // set, so the OTel `http.route` attribute read from the same field
+    // later cannot disagree with the metric.
+    ctx.metrics_route = templated_route(pipeline, ctx, metrics_route);
     ctx.response_body_mode = super::clamp_body_mode_to_ceiling(response_body_mode, baseline_response_body_mode);
 
     match action {
@@ -1079,6 +1082,27 @@ fn reject_reserved_internal_headers(session: &Session) -> Option<Rejection> {
         "rejecting request with client-supplied reserved internal headers"
     );
     Some(Rejection::status(400))
+}
+
+/// Collapse the route label to a configured path template when one matches.
+///
+/// Falls back to the router's path-match pattern when no template matches,
+/// so an unmatched path never widens cardinality. Returns immediately when
+/// no templates are configured, which is the default.
+fn templated_route(
+    pipeline: &FilterPipeline,
+    ctx: &PingoraRequestCtx,
+    metrics_route: Option<::metrics::SharedString>,
+) -> Option<::metrics::SharedString> {
+    let templates = pipeline.route_templates();
+    if templates.is_empty() {
+        return metrics_route;
+    }
+    ctx.request_snapshot
+        .as_ref()
+        .and_then(|request| templates.match_path(request.uri.path()))
+        .map(|label| ::metrics::SharedString::from(label.to_owned()))
+        .or(metrics_route)
 }
 
 // -----------------------------------------------------------------------------

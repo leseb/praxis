@@ -63,6 +63,7 @@ mod redirect;
 mod retry_policy;
 mod ring_hash;
 mod round_robin;
+mod route_templates;
 mod security_examples;
 mod session_affinity;
 mod static_response;

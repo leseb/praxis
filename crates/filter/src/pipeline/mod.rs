@@ -112,6 +112,9 @@ pub struct FilterPipeline {
     /// Whether per-filter duration metrics are recorded.
     record_filter_duration_metrics: bool,
 
+    /// Compiled path templates for the `route` metric label.
+    route_templates: Arc<praxis_core::config::RouteTemplates>,
+
     /// Shared health registry for endpoint health lookups.
     health_registry: Option<HealthRegistry>,
 
@@ -326,6 +329,17 @@ impl FilterPipeline {
     /// Whether per-filter duration metrics are recorded.
     pub fn records_filter_duration_metrics(&self) -> bool {
         self.record_filter_duration_metrics
+    }
+
+    /// Set the compiled path templates used for the `route` metric label.
+    pub fn set_route_templates(&mut self, templates: Arc<praxis_core::config::RouteTemplates>) {
+        self.visit_nested_pipelines(&mut |pipeline| pipeline.set_route_templates(Arc::clone(&templates)));
+        self.route_templates = templates;
+    }
+
+    /// The compiled path templates for the `route` metric label.
+    pub fn route_templates(&self) -> &praxis_core::config::RouteTemplates {
+        &self.route_templates
     }
 
     /// The shared health registry, if set.

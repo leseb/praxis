@@ -50,7 +50,7 @@ pub use filters::{FailureMode, FilterChainConfig, FilterEntry};
 pub use insecure_options::{InsecureOptions, SkipPipelineChecks};
 pub use listener::{Listener, ListenerTls, ProtocolKind};
 pub use logging::{DEFAULT_BUFFER_SIZE_LINES, LogOutput, LoggingConfig};
-pub use metrics::MetricsConfig;
+pub use metrics::{MetricsConfig, RouteTemplates};
 use parse::check_yaml_safety;
 pub use parse::read_config_file;
 pub use praxis_tls::{CachedClusterTls, ClusterTls};

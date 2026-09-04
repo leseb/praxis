@@ -465,6 +465,7 @@ mod tests {
             compression: None,
             filters,
             record_filter_duration_metrics: false,
+            route_templates: Arc::default(),
             health_registry: None,
             id_generator: Arc::new(praxis_core::id::IdGenerator::with_seed(0)),
             kv_stores: None,

@@ -151,7 +151,7 @@ Total completed HTTP requests.
 | -------------- | ---------------------------------------- |
 | `method` | `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD`, `OPTIONS`, `TRACE`, `CONNECT`, `OTHER` |
 | `status_class` | `1xx`, `2xx`, `3xx`, `4xx`, `5xx`, `unknown` |
-| `route` | Route name or `"unknown"` |
+| `route` | Route path-match pattern (e.g. `/api/*`), a configured path template, or `"unknown"` |
 | `cluster` | Cluster name or `"none"` |
 
 Non-standard HTTP methods (e.g. `PURGE`) are
@@ -328,6 +328,46 @@ the gauge on the same path they log on.
 Unlike `praxis_connections_active`, which counts HTTP
 requests and TCP sessions under one name, this series
 carries only TCP connections.
+
+### Route Label Templating
+
+By default the `route` label is the router's
+path-match pattern, so a prefix route collapses every
+path beneath it to one series (`/api/*`). Path
+templates give a middle ground: more precise than the
+prefix, still bounded.
+
+```yaml
+metrics:
+  route_templates:
+    - "/users/{id}"
+    - "/users/{id}/orders"
+    - "/api/{version}/health"
+```
+
+A request whose path matches a template is labeled
+with the template rather than the router pattern, so
+`/users/42/orders` and `/users/99/orders` share the
+series `route="/users/{id}/orders"`.
+
+Matching rules:
+
+- `{name}` matches exactly one non-empty path
+  segment; the name is arbitrary and only documents
+  intent.
+- Segment counts must match exactly, so `/users/{id}`
+  does not match `/users/42/orders`.
+- The query string is ignored.
+- When two templates could match, the first in
+  configuration order wins.
+- A path matching no template keeps the router's
+  pattern, or `"unknown"` when no route matched.
+  Raw paths are never used as label values.
+
+Templates are compiled at startup and indexed by
+segment count, so matching costs one walk of the
+request's path segments with no allocation and no
+regular expressions.
 
 ### Filter Duration Histograms
 
