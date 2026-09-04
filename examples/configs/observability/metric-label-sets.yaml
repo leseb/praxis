@@ -1,0 +1,46 @@
+# Metric Label Sets
+#
+# Selectively disables individual label dimensions on Prometheus metrics to
+# bound total time-series cardinality. Every dimension is on by default;
+# turning one off drops it from every metric that carries it while leaving
+# the metric itself available on the admin /metrics endpoint.
+#
+# Usage:
+#   cargo run -p praxis-proxy -- -c examples/configs/observability/metric-label-sets.yaml
+#
+# Exercise:
+#   curl -s http://localhost:8080/api/hello
+#   curl -s http://localhost:9901/metrics | grep praxis_http_requests_total
+
+admin:
+  address: "127.0.0.1:9901"
+
+metrics:
+  labels:
+    # The two dimensions that grow with traffic shape rather than with
+    # config size, and so dominate cardinality in large deployments.
+    disabled:
+      - route
+      - endpoint
+
+insecure_options:
+  allow_private_endpoints: true
+
+listeners:
+  - name: web
+    address: "127.0.0.1:8080"
+    filter_chains:
+      - routing
+
+filter_chains:
+  - name: routing
+    filters:
+      - filter: router
+        routes:
+          - path_prefix: "/"
+            cluster: backend
+      - filter: load_balancer
+        clusters:
+          - name: backend
+            endpoints:
+              - "127.0.0.1:3000"

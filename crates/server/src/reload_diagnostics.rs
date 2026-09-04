@@ -25,6 +25,7 @@ pub(crate) fn log_restart_required_changes(old: &Config, new: &Config) {
     detect_startup_only_runtime_changes(old, new);
     detect_admin_changes(old, new);
     detect_logging_change(old, new);
+    detect_metrics_labels_change(old, new);
 }
 
 /// Index a config's listeners by name for O(1) old/new pairing.
@@ -282,6 +283,21 @@ fn detect_admin_changes(old: &Config, new: &Config) {
 fn detect_logging_change(old: &Config, new: &Config) {
     if old.runtime.logging != new.runtime.logging {
         warn!("runtime.logging changed; requires restart (subscriber init is once-per-process)");
+    }
+}
+
+/// Detect `metrics.labels` changes that require a restart.
+///
+/// The selected label set installs once per process: a gauge guard acquired
+/// before a change and released after it would increment one series and
+/// decrement another, so a reload that alters `metrics.labels` is ignored
+/// until restart. Compared as a set, so merely reordering `disabled` does
+/// not warn.
+fn detect_metrics_labels_change(old: &Config, new: &Config) {
+    let old_disabled: std::collections::HashSet<_> = old.metrics.labels.disabled.iter().copied().collect();
+    let new_disabled: std::collections::HashSet<_> = new.metrics.labels.disabled.iter().copied().collect();
+    if old_disabled != new_disabled {
+        warn!("metrics.labels changed; requires restart (label selection installs once per process)");
     }
 }
 
@@ -753,6 +769,33 @@ mod tests {
         assert!(
             warnings[0].contains("runtime.logging"),
             "warning should mention logging"
+        );
+    }
+
+    #[test]
+    fn metrics_labels_change_warns() {
+        let old = config_with_circuit_breaker(None);
+        let mut new = old.clone();
+        new.metrics.labels.disabled = vec![praxis_core::config::MetricLabel::Cluster];
+        let warnings = capture_warnings(|| detect_metrics_labels_change(&old, &new));
+        assert_eq!(warnings.len(), 1, "a metrics.labels change should warn once");
+        assert!(
+            warnings[0].contains("metrics.labels"),
+            "warning should mention metrics.labels"
+        );
+    }
+
+    #[test]
+    fn metrics_labels_reorder_does_not_warn() {
+        use praxis_core::config::MetricLabel::{Endpoint, Route};
+        let mut old = config_with_circuit_breaker(None);
+        old.metrics.labels.disabled = vec![Route, Endpoint];
+        let mut new = old.clone();
+        new.metrics.labels.disabled = vec![Endpoint, Route];
+        let warnings = capture_warnings(|| detect_metrics_labels_change(&old, &new));
+        assert!(
+            warnings.is_empty(),
+            "a mere reorder of disabled dimensions must not warn"
         );
     }
 }

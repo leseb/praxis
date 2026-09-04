@@ -30,6 +30,13 @@ pub struct MetricsConfig {
     /// Record per-filter hook duration histograms (`praxis_filter_duration_seconds`).
     pub filter_duration: bool,
 
+    /// Label dimensions to emit on metrics.
+    ///
+    /// Disabling a dimension drops it from every metric that carries it,
+    /// bounding total time-series cardinality in large deployments while
+    /// keeping the underlying metric available.
+    pub labels: MetricLabelsConfig,
+
     /// Path templates that collapse dynamic segments in the `route` label.
     ///
     /// Each entry is a path with `{name}` placeholders, e.g.
@@ -38,6 +45,95 @@ pub struct MetricsConfig {
     /// pattern, keeping the label stable and bounded while staying more
     /// precise than a prefix match.
     pub route_templates: Vec<String>,
+}
+
+// -----------------------------------------------------------------------------
+// MetricLabelsConfig
+// -----------------------------------------------------------------------------
+
+/// A label dimension that metrics can carry.
+///
+/// ```
+/// use praxis_core::config::MetricLabel;
+///
+/// let label: MetricLabel = serde_yaml::from_str("status_class").unwrap();
+/// assert_eq!(label, MetricLabel::StatusClass);
+/// ```
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetricLabel {
+    /// The `cluster` label. Grows with configured clusters.
+    ///
+    /// Disabling it drops `cluster` from the additive cluster metrics
+    /// (request, upstream-request, connect-failure, retry and
+    /// health-transition counters, and the connect-duration histogram).
+    /// The per-cluster health gauges keep the label, since they are set
+    /// rather than summed and dropping it would collapse every cluster
+    /// onto one series.
+    Cluster,
+
+    /// The `endpoint` label. Grows with upstream endpoints.
+    Endpoint,
+
+    /// The `listener` label. Grows with configured listeners.
+    Listener,
+
+    /// The `method` label. Bounded to ten values.
+    Method,
+
+    /// The `route` label. Grows with configured routes, or with path
+    /// templates when `route_templates` is set.
+    Route,
+
+    /// The `status_class` label. Bounded to six values.
+    StatusClass,
+}
+
+/// Which label dimensions metrics carry.
+///
+/// Every dimension is emitted unless listed in `disabled`, so the default
+/// configuration emits exactly the series it emitted before this setting
+/// existed. Disabling a dimension removes it from the series key,
+/// collapsing the series that differed only by it.
+///
+/// This is read once at startup and never re-read. A gauge whose guard is
+/// acquired before a reload and released after it would otherwise increment
+/// one series and decrement a different one, stranding both.
+///
+/// ```
+/// use praxis_core::config::{MetricLabel, MetricLabelsConfig};
+///
+/// let labels = MetricLabelsConfig::default();
+/// assert!(labels.is_enabled(MetricLabel::Route));
+/// assert!(labels.all_enabled());
+///
+/// let labels: MetricLabelsConfig = serde_yaml::from_str("disabled: [route]").unwrap();
+/// assert!(!labels.is_enabled(MetricLabel::Route));
+/// assert!(labels.is_enabled(MetricLabel::Cluster));
+/// assert!(!labels.all_enabled());
+/// ```
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MetricLabelsConfig {
+    /// Dimensions to drop from every metric that carries them.
+    pub disabled: Vec<MetricLabel>,
+}
+
+impl MetricLabelsConfig {
+    /// Whether `label` is emitted.
+    #[must_use]
+    pub fn is_enabled(&self, label: MetricLabel) -> bool {
+        !self.disabled.contains(&label)
+    }
+
+    /// Whether every dimension is enabled, i.e. the default label set.
+    ///
+    /// Recorders take an allocation-free fast path when this holds, so the
+    /// common case pays nothing for the feature.
+    #[must_use]
+    pub fn all_enabled(&self) -> bool {
+        self.disabled.is_empty()
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -165,6 +261,65 @@ mod tests {
         assert!(
             !metrics.filter_duration,
             "empty yaml should default filter_duration to false"
+        );
+    }
+
+    #[test]
+    fn label_dimensions_default_to_enabled() {
+        let labels = MetricLabelsConfig::default();
+        assert!(labels.all_enabled(), "the default must emit today's label set exactly");
+        for label in [
+            MetricLabel::Cluster,
+            MetricLabel::Endpoint,
+            MetricLabel::Listener,
+            MetricLabel::Method,
+            MetricLabel::Route,
+            MetricLabel::StatusClass,
+        ] {
+            assert!(labels.is_enabled(label), "{label:?} should default to enabled");
+        }
+    }
+
+    #[test]
+    fn disabling_one_dimension_clears_all_enabled() {
+        let labels: MetricLabelsConfig = serde_yaml::from_str("disabled: [endpoint]").unwrap();
+        assert!(!labels.is_enabled(MetricLabel::Endpoint), "endpoint should be disabled");
+        assert!(
+            labels.is_enabled(MetricLabel::Cluster),
+            "unlisted dimensions stay enabled"
+        );
+        assert!(!labels.all_enabled(), "the fast path must not be taken");
+    }
+
+    #[test]
+    fn metrics_config_parses_nested_labels() {
+        let metrics: MetricsConfig = serde_yaml::from_str("labels:\n  disabled: [route, endpoint]").unwrap();
+        assert!(
+            !metrics.labels.is_enabled(MetricLabel::Route),
+            "route should be disabled"
+        );
+        assert!(
+            !metrics.labels.is_enabled(MetricLabel::Endpoint),
+            "endpoint should be disabled"
+        );
+        assert!(
+            metrics.labels.is_enabled(MetricLabel::Method),
+            "method should remain enabled"
+        );
+    }
+
+    #[test]
+    fn unknown_label_names_are_rejected() {
+        let parsed: Result<MetricLabelsConfig, _> = serde_yaml::from_str("disabled: [not_a_label]");
+        assert!(parsed.is_err(), "an unknown dimension name must not parse silently");
+    }
+
+    #[test]
+    fn metrics_config_defaults_to_all_labels() {
+        let metrics: MetricsConfig = serde_yaml::from_str("{}").unwrap();
+        assert!(
+            metrics.labels.all_enabled(),
+            "an empty metrics section must not change any series"
         );
     }
 

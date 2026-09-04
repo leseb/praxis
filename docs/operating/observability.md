@@ -329,6 +329,57 @@ Unlike `praxis_connections_active`, which counts HTTP
 requests and TCP sessions under one name, this series
 carries only TCP connections.
 
+### Metric Label Sets
+
+Every label dimension is emitted by default. In
+large deployments the combination of dimensions can
+produce more time series than a Prometheus server
+should hold, so each can be turned off individually:
+
+```yaml
+metrics:
+  labels:
+    disabled:
+      - route
+      - endpoint
+```
+
+| Dimension | Default | Grows with |
+| -------------- | ------- | ---------------------------------- |
+| `cluster` | on | Configured clusters |
+| `endpoint` | on | Upstream endpoints |
+| `listener` | on | Configured listeners |
+| `method` | on | Bounded: ten values |
+| `route` | on | Configured routes, or path templates |
+| `status_class` | on | Bounded: six values |
+
+Disabling a dimension drops it from every metric
+that carries it; the metric itself stays available,
+with the series that differed only by that dimension
+collapsed into one. `endpoint` and `route` are the
+usual candidates, since they grow with traffic shape
+rather than with config size.
+
+The one exception is `cluster` on the per-cluster
+health gauges (`praxis_upstream_healthy_endpoints`
+and `praxis_upstream_total_endpoints`): those gauges
+are set rather than summed, so dropping the label
+would collapse every cluster onto one last-writer
+series rather than lowering cardinality. Disabling
+`cluster` therefore drops it from the additive
+cluster metrics but keeps it on those two gauges.
+
+Label selection is read once at startup and is not
+hot-reloadable. A gauge whose guard is acquired
+before a change and released after it would
+increment one series and decrement another, leaving
+both stranded; changing the label set requires a
+restart.
+
+Leaving every dimension enabled (the default) takes
+an allocation-free path through the recorders, so the
+setting costs nothing when unused.
+
 ### Route Label Templating
 
 By default the `route` label is the router's

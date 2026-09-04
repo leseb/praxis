@@ -4,8 +4,9 @@
 //! Prometheus metrics for TCP connection lifecycle.
 
 use metrics::{SharedString, counter, gauge, histogram};
+use praxis_core::config::MetricLabel;
 
-use crate::http::pingora::metrics::is_recorder_installed;
+use crate::http::pingora::metrics::{is_recorder_installed, metric_labels};
 
 // -----------------------------------------------------------------------------
 // Constants
@@ -42,6 +43,10 @@ pub(crate) fn record_tcp_connection_accepted(listener: SharedString) {
     if !is_recorder_installed() {
         return;
     }
+    if !metric_labels().is_enabled(MetricLabel::Listener) {
+        counter!(TCP_CONNECTIONS_TOTAL).increment(1);
+        return;
+    }
     counter!(TCP_CONNECTIONS_TOTAL, "listener" => listener).increment(1);
 }
 
@@ -57,6 +62,10 @@ pub(crate) fn record_tcp_connection_accepted(listener: SharedString) {
 /// (i.e. when the admin interface is disabled).
 pub(crate) fn record_tcp_connection_duration(listener: SharedString, reason: &'static str, duration_secs: f64) {
     if !is_recorder_installed() {
+        return;
+    }
+    if !metric_labels().is_enabled(MetricLabel::Listener) {
+        histogram!(TCP_CONNECTION_DURATION_SECONDS, "reason" => reason).record(duration_secs);
         return;
     }
     histogram!(
@@ -78,6 +87,11 @@ pub(crate) fn record_tcp_connection_duration(listener: SharedString, reason: &'s
 /// (i.e. when the admin interface is disabled).
 pub(crate) fn record_tcp_bytes(listener: SharedString, received: u64, sent: u64) {
     if !is_recorder_installed() {
+        return;
+    }
+    if !metric_labels().is_enabled(MetricLabel::Listener) {
+        counter!(TCP_BYTES_RECEIVED_TOTAL).increment(received);
+        counter!(TCP_BYTES_SENT_TOTAL).increment(sent);
         return;
     }
     counter!(TCP_BYTES_RECEIVED_TOTAL, "listener" => listener.clone()).increment(received);
@@ -102,7 +116,11 @@ impl TcpActiveConnectionGuard {
     /// Increment the gauge and return a guard that decrements on drop.
     pub(crate) fn acquire(listener: SharedString) -> Self {
         if is_recorder_installed() {
-            gauge!(TCP_ACTIVE_CONNECTIONS, "listener" => listener.clone()).increment(1.0);
+            if metric_labels().is_enabled(MetricLabel::Listener) {
+                gauge!(TCP_ACTIVE_CONNECTIONS, "listener" => listener.clone()).increment(1.0);
+            } else {
+                gauge!(TCP_ACTIVE_CONNECTIONS).increment(1.0);
+            }
         }
         Self { listener }
     }
@@ -111,7 +129,11 @@ impl TcpActiveConnectionGuard {
 impl Drop for TcpActiveConnectionGuard {
     fn drop(&mut self) {
         if is_recorder_installed() {
-            gauge!(TCP_ACTIVE_CONNECTIONS, "listener" => self.listener.clone()).decrement(1.0);
+            if metric_labels().is_enabled(MetricLabel::Listener) {
+                gauge!(TCP_ACTIVE_CONNECTIONS, "listener" => self.listener.clone()).decrement(1.0);
+            } else {
+                gauge!(TCP_ACTIVE_CONNECTIONS).decrement(1.0);
+            }
         }
     }
 }

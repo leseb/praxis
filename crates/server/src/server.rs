@@ -120,6 +120,11 @@ pub fn run_server_with_registry(
 
     // Install before pipelines and health checks emit startup metrics. The same
     // handle is later shared by `/metrics` and the managed upkeep service.
+    // Label selection is installed first and never changed: a gauge guard
+    // acquired before a change and released after it would increment one
+    // series and decrement another, stranding both.
+    praxis_protocol::http::pingora::metrics::install_metric_labels(config.metrics.labels.clone());
+
     #[cfg(feature = "admin-api")]
     let prometheus_recorder = config
         .admin

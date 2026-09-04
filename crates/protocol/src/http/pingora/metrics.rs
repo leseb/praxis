@@ -6,8 +6,9 @@
 
 use std::sync::OnceLock;
 
-use metrics::{SharedString, counter, gauge, histogram};
+use metrics::{Label, SharedString, counter, gauge, histogram};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
+use praxis_core::config::{MetricLabel, MetricLabelsConfig};
 
 // -----------------------------------------------------------------------------
 // Constants
@@ -144,6 +145,44 @@ const BODY_SIZE_BUCKETS_BYTES: &[f64] = &[
 /// Global handle to the Prometheus exporter.
 static PROMETHEUS_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
 
+/// Label dimensions to emit, installed once at startup.
+static LABEL_CONFIG: OnceLock<MetricLabelsConfig> = OnceLock::new();
+
+/// Every dimension enabled: the default, and the fallback before install.
+static ALL_LABELS: OnceLock<MetricLabelsConfig> = OnceLock::new();
+
+/// Install the label dimensions to emit.
+///
+/// Must be called once during startup, before any metric is recorded.
+/// Later calls are ignored: a gauge guard acquired before a change and
+/// released after it would increment one series and decrement another.
+pub fn install_metric_labels(labels: MetricLabelsConfig) {
+    let _existing = LABEL_CONFIG.set(labels);
+}
+
+/// The installed label dimensions, defaulting to all enabled.
+pub(crate) fn metric_labels() -> &'static MetricLabelsConfig {
+    LABEL_CONFIG
+        .get()
+        .unwrap_or_else(|| ALL_LABELS.get_or_init(MetricLabelsConfig::default))
+}
+
+/// Build a label set, dropping the dimensions that are disabled.
+///
+/// Only reached when at least one dimension is off; the all-enabled path
+/// uses the static-label macro form and allocates nothing.
+fn selected_labels(pairs: &[(&'static str, Option<SharedString>)]) -> Vec<Label> {
+    pairs
+        .iter()
+        .filter_map(|(name, value)| value.clone().map(|value| Label::new(*name, value)))
+        .collect()
+}
+
+/// The value for a dimension, or `None` when that dimension is disabled.
+fn label_if(enabled: bool, value: SharedString) -> Option<SharedString> {
+    enabled.then_some(value)
+}
+
 /// Install the global Prometheus metrics recorder.
 ///
 /// Must be called exactly once during server startup. Subsequent
@@ -264,11 +303,53 @@ pub(crate) struct RequestMetricLabels {
     pub status_class: &'static str,
 }
 
+/// Build the enabled subset of the request-metric labels.
+fn selected_request_labels(labels: RequestMetricLabels) -> Vec<Label> {
+    let selected = metric_labels();
+    let pairs = [
+        (
+            "method",
+            label_if(
+                selected.is_enabled(MetricLabel::Method),
+                SharedString::const_str(labels.method),
+            ),
+        ),
+        (
+            "status_class",
+            label_if(
+                selected.is_enabled(MetricLabel::StatusClass),
+                SharedString::const_str(labels.status_class),
+            ),
+        ),
+        ("route", label_if(selected.is_enabled(MetricLabel::Route), labels.route)),
+        (
+            "cluster",
+            label_if(selected.is_enabled(MetricLabel::Cluster), labels.cluster),
+        ),
+    ];
+    selected_labels(&pairs)
+}
+
 /// Record HTTP request metrics for a completed request.
 pub(crate) fn record_request_metrics(labels: RequestMetricLabels, duration_secs: f64) {
     if !is_recorder_installed() {
         return;
     }
+    if !metric_labels().all_enabled() {
+        let emitted = selected_request_labels(labels);
+        counter!(HTTP_REQUESTS_TOTAL, emitted.clone()).increment(1);
+        histogram!(HTTP_REQUEST_DURATION_SECONDS, emitted).record(duration_secs);
+        return;
+    }
+    record_request_metrics_all_labels(labels, duration_secs);
+}
+
+/// Record request metrics with the full default label set.
+///
+/// Kept on the static-label macro form so the default configuration emits
+/// exactly the series it did before label selection existed, with no
+/// per-request allocation.
+fn record_request_metrics_all_labels(labels: RequestMetricLabels, duration_secs: f64) {
     let cluster = labels.cluster;
     let route = labels.route;
     counter!(
@@ -289,6 +370,53 @@ pub(crate) fn record_request_metrics(labels: RequestMetricLabels, duration_secs:
     .record(duration_secs);
 }
 
+/// Build the enabled subset of the body-size histogram labels.
+fn selected_body_labels(method: &'static str, status_class: &'static str, cluster: SharedString) -> Vec<Label> {
+    let selected = metric_labels();
+    let pairs = [
+        (
+            "method",
+            label_if(
+                selected.is_enabled(MetricLabel::Method),
+                SharedString::const_str(method),
+            ),
+        ),
+        (
+            "status_class",
+            label_if(
+                selected.is_enabled(MetricLabel::StatusClass),
+                SharedString::const_str(status_class),
+            ),
+        ),
+        ("cluster", label_if(selected.is_enabled(MetricLabel::Cluster), cluster)),
+    ];
+    selected_labels(&pairs)
+}
+
+/// Record body-size histograms with the full default label set.
+fn record_body_size_all_labels(
+    method: &'static str,
+    status_class: &'static str,
+    cluster: SharedString,
+    request_bytes: f64,
+    response_bytes: f64,
+) {
+    histogram!(
+        HTTP_REQUEST_BODY_BYTES,
+        "method" => method,
+        "status_class" => status_class,
+        "cluster" => cluster.clone()
+    )
+    .record(request_bytes);
+    histogram!(
+        HTTP_RESPONSE_BODY_BYTES,
+        "method" => method,
+        "status_class" => status_class,
+        "cluster" => cluster
+    )
+    .record(response_bytes);
+}
+
 /// Record HTTP request and response body size histograms.
 pub(crate) fn record_body_size_metrics(
     method: &'static str,
@@ -304,27 +432,24 @@ pub(crate) fn record_body_size_metrics(
         clippy::cast_precision_loss,
         reason = "body byte counts as histogram observations; exact integer precision not required"
     )]
-    {
-        histogram!(
-            HTTP_REQUEST_BODY_BYTES,
-            "method" => method,
-            "status_class" => status_class,
-            "cluster" => cluster.clone()
-        )
-        .record(request_body_bytes as f64);
-        histogram!(
-            HTTP_RESPONSE_BODY_BYTES,
-            "method" => method,
-            "status_class" => status_class,
-            "cluster" => cluster
-        )
-        .record(response_body_bytes as f64);
+    let (request_bytes, response_bytes) = (request_body_bytes as f64, response_body_bytes as f64);
+
+    if !metric_labels().all_enabled() {
+        let emitted = selected_body_labels(method, status_class, cluster);
+        histogram!(HTTP_REQUEST_BODY_BYTES, emitted.clone()).record(request_bytes);
+        histogram!(HTTP_RESPONSE_BODY_BYTES, emitted).record(response_bytes);
+        return;
     }
+    record_body_size_all_labels(method, status_class, cluster, request_bytes, response_bytes);
 }
 
 /// Increment the active-connections gauge for a listener.
 pub(crate) fn inc_connections_active(listener: SharedString) {
     if !is_recorder_installed() {
+        return;
+    }
+    if !metric_labels().is_enabled(MetricLabel::Listener) {
+        gauge!(CONNECTIONS_ACTIVE).increment(1.0);
         return;
     }
     gauge!(CONNECTIONS_ACTIVE, "listener" => listener).increment(1.0);
@@ -333,6 +458,10 @@ pub(crate) fn inc_connections_active(listener: SharedString) {
 /// Decrement the active-connections gauge for a listener.
 pub(crate) fn dec_connections_active(listener: SharedString) {
     if !is_recorder_installed() {
+        return;
+    }
+    if !metric_labels().is_enabled(MetricLabel::Listener) {
+        gauge!(CONNECTIONS_ACTIVE).decrement(1.0);
         return;
     }
     gauge!(CONNECTIONS_ACTIVE, "listener" => listener).decrement(1.0);
@@ -377,7 +506,11 @@ impl ActiveRequestGuard {
     /// Increment the gauge and return a guard that decrements on drop.
     pub(crate) fn acquire(listener: SharedString) -> Self {
         if is_recorder_installed() {
-            gauge!(HTTP_ACTIVE_REQUESTS, "listener" => listener.clone()).increment(1.0);
+            if metric_labels().is_enabled(MetricLabel::Listener) {
+                gauge!(HTTP_ACTIVE_REQUESTS, "listener" => listener.clone()).increment(1.0);
+            } else {
+                gauge!(HTTP_ACTIVE_REQUESTS).increment(1.0);
+            }
         }
         Self { listener }
     }
@@ -386,7 +519,11 @@ impl ActiveRequestGuard {
 impl Drop for ActiveRequestGuard {
     fn drop(&mut self) {
         if is_recorder_installed() {
-            gauge!(HTTP_ACTIVE_REQUESTS, "listener" => self.listener.clone()).decrement(1.0);
+            if metric_labels().is_enabled(MetricLabel::Listener) {
+                gauge!(HTTP_ACTIVE_REQUESTS, "listener" => self.listener.clone()).decrement(1.0);
+            } else {
+                gauge!(HTTP_ACTIVE_REQUESTS).decrement(1.0);
+            }
         }
     }
 }
@@ -459,7 +596,11 @@ pub(crate) fn record_upstream_connect_duration(cluster: SharedString, duration_s
     if !is_recorder_installed() {
         return;
     }
-    histogram!(UPSTREAM_CONNECT_DURATION_SECONDS, "cluster" => cluster).record(duration_secs);
+    if metric_labels().is_enabled(MetricLabel::Cluster) {
+        histogram!(UPSTREAM_CONNECT_DURATION_SECONDS, "cluster" => cluster).record(duration_secs);
+    } else {
+        histogram!(UPSTREAM_CONNECT_DURATION_SECONDS).record(duration_secs);
+    }
 }
 
 /// Record a request that reached an upstream endpoint.
@@ -470,6 +611,25 @@ pub(crate) fn record_upstream_connect_duration(cluster: SharedString, duration_s
 /// (filter rejections, connect failures) are not counted here.
 pub(crate) fn record_upstream_request(cluster: SharedString, endpoint: SharedString, status_class: &'static str) {
     if !is_recorder_installed() {
+        return;
+    }
+    let selected = metric_labels();
+    if !selected.all_enabled() {
+        let pairs = [
+            ("cluster", label_if(selected.is_enabled(MetricLabel::Cluster), cluster)),
+            (
+                "endpoint",
+                label_if(selected.is_enabled(MetricLabel::Endpoint), endpoint),
+            ),
+            (
+                "status_class",
+                label_if(
+                    selected.is_enabled(MetricLabel::StatusClass),
+                    SharedString::const_str(status_class),
+                ),
+            ),
+        ];
+        counter!(UPSTREAM_REQUESTS_TOTAL, selected_labels(&pairs)).increment(1);
         return;
     }
     counter!(
@@ -486,7 +646,11 @@ pub(crate) fn record_upstream_connect_failure(cluster: SharedString) {
     if !is_recorder_installed() {
         return;
     }
-    counter!(UPSTREAM_CONNECT_FAILURES_TOTAL, "cluster" => cluster).increment(1);
+    if metric_labels().is_enabled(MetricLabel::Cluster) {
+        counter!(UPSTREAM_CONNECT_FAILURES_TOTAL, "cluster" => cluster).increment(1);
+    } else {
+        counter!(UPSTREAM_CONNECT_FAILURES_TOTAL).increment(1);
+    }
 }
 
 /// Record an upstream connect-failure retry outcome.
@@ -494,10 +658,22 @@ pub(crate) fn record_upstream_retry(cluster: SharedString, result: &'static str)
     if !is_recorder_installed() {
         return;
     }
-    counter!(UPSTREAM_RETRIES_TOTAL, "cluster" => cluster, "result" => result).increment(1);
+    if metric_labels().is_enabled(MetricLabel::Cluster) {
+        counter!(UPSTREAM_RETRIES_TOTAL, "cluster" => cluster, "result" => result).increment(1);
+    } else {
+        counter!(UPSTREAM_RETRIES_TOTAL, "result" => result).increment(1);
+    }
 }
 
 /// Refresh cluster endpoint health gauges.
+///
+/// The `cluster` label is structural here and is kept even when the
+/// `cluster` dimension is disabled: these gauges are keyed by cluster and
+/// set (not incremented), so dropping the label would collapse every
+/// cluster onto one last-writer-wins series rather than merely lowering
+/// cardinality. Disabling `cluster` therefore drops it from the additive
+/// cluster metrics (counters and the connect-duration histogram) but not
+/// from the per-cluster health gauges.
 pub(crate) fn set_upstream_endpoint_gauges(cluster: SharedString, healthy: usize, total: usize) {
     if !is_recorder_installed() {
         return;
@@ -547,12 +723,16 @@ pub(crate) fn record_health_transition(cluster: SharedString, result: &'static s
     if !is_recorder_installed() {
         return;
     }
-    counter!(
-        UPSTREAM_HEALTH_TRANSITIONS_TOTAL,
-        "cluster" => cluster.clone(),
-        "result" => result
-    )
-    .increment(1);
+    if metric_labels().is_enabled(MetricLabel::Cluster) {
+        counter!(
+            UPSTREAM_HEALTH_TRANSITIONS_TOTAL,
+            "cluster" => cluster.clone(),
+            "result" => result
+        )
+        .increment(1);
+    } else {
+        counter!(UPSTREAM_HEALTH_TRANSITIONS_TOTAL, "result" => result).increment(1);
+    }
     set_upstream_endpoint_gauges(cluster, healthy, total);
 }
 
@@ -732,6 +912,56 @@ mod tests {
                 "praxis_upstream_requests_total{cluster=\"api\",endpoint=\"10.0.0.7:8080\",status_class=\"5xx\"} 1"
             ),
             "counter should carry all three labels:\n{body}"
+        );
+    }
+
+    #[test]
+    fn selected_labels_drops_disabled_dimensions() {
+        let pairs = [
+            ("method", Some(SharedString::const_str("GET"))),
+            ("route", None),
+            ("cluster", Some(SharedString::const_str("api"))),
+        ];
+        let emitted = selected_labels(&pairs);
+        let names: Vec<&str> = emitted.iter().map(Label::key).collect();
+        assert_eq!(names, vec!["method", "cluster"], "a disabled dimension must be absent");
+    }
+
+    #[test]
+    fn selected_labels_preserves_order_and_values() {
+        let pairs = [
+            ("cluster", Some(SharedString::const_str("api"))),
+            ("endpoint", Some(SharedString::const_str("10.0.0.1:80"))),
+        ];
+        let emitted = selected_labels(&pairs);
+        let rendered: Vec<(&str, &str)> = emitted.iter().map(|l| (l.key(), l.value())).collect();
+        assert_eq!(
+            rendered,
+            vec![("cluster", "api"), ("endpoint", "10.0.0.1:80")],
+            "enabled dimensions keep their order and values"
+        );
+    }
+
+    #[test]
+    fn label_if_gates_on_the_flag() {
+        assert_eq!(
+            label_if(true, SharedString::const_str("x")).as_deref(),
+            Some("x"),
+            "an enabled dimension keeps its value"
+        );
+        assert_eq!(
+            label_if(false, SharedString::const_str("x")),
+            None,
+            "a disabled dimension yields no value"
+        );
+    }
+
+    #[test]
+    fn metric_labels_default_to_all_enabled() {
+        assert!(
+            metric_labels().all_enabled(),
+            "without an explicit install every dimension must stay on, so the \
+             recorders keep their allocation-free fast path"
         );
     }
 
