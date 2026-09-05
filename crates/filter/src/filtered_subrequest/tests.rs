@@ -90,6 +90,16 @@ fn classify_invalid_request_falls_through_to_io() {
     assert_eq!(kind, super::TransportFailure::Io);
 }
 
+#[test]
+fn classify_circuit_open_returns_503() {
+    let error = praxis_core::subrequest::SubRequestError::CircuitOpen {
+        peer: "backend".to_owned(),
+    };
+    let (status, kind) = super::transport::classify_transport_failure(&error);
+    assert_eq!(status, 503, "CircuitOpen should return 503");
+    assert_eq!(kind, super::TransportFailure::CircuitOpen);
+}
+
 // ---------------------------------------------------------------------------
 // strip_reserved_headers
 // ---------------------------------------------------------------------------

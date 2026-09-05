@@ -140,7 +140,7 @@ impl FilteredStreamingBody {
 
         match result? {
             crate::actions::FilterAction::Reject(_) => {
-                Err("iterative_request_router: step body filter rejected during stream"
+                Err("filtered_subrequest: step body filter rejected during stream"
                     .to_owned()
                     .into())
             },
@@ -180,7 +180,7 @@ impl FilteredStreamingBody {
 
     /// Complete the step after a response-body filter failure.
     async fn handle_filter_error(&mut self, error: FilterError) -> Result<Option<Bytes>, FilterError> {
-        warn!("iterative_request_router: response body filter failed: {error}");
+        warn!("filtered_subrequest: response body filter failed: {error}");
         if let Some(upstream_body) = self.upstream.take() {
             (*upstream_body).cancel().await;
         }
@@ -189,7 +189,7 @@ impl FilteredStreamingBody {
             .insert(StreamTermination::new(StreamTerminationCause::Filter));
         let completion = self.complete_step().map_err(|completion_error| -> FilterError {
             format!(
-                "iterative_request_router: response filter failed ({error}); completion also failed ({completion_error})"
+                "filtered_subrequest: response filter failed ({error}); completion also failed ({completion_error})"
             )
             .into()
         })?;
@@ -248,9 +248,10 @@ impl StreamingResponseBody for FilteredStreamingBody {
         }
 
         loop {
-            let upstream = self.upstream.as_mut().ok_or_else(|| -> FilterError {
-                "iterative_request_router: upstream already consumed".to_owned().into()
-            })?;
+            let upstream = self
+                .upstream
+                .as_mut()
+                .ok_or_else(|| -> FilterError { "filtered_subrequest: upstream already consumed".to_owned().into() })?;
 
             let remaining = self
                 .continuation

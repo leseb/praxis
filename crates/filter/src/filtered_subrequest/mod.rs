@@ -297,7 +297,7 @@ impl FilteredSubrequestExecutor {
             .unwrap_or(Duration::ZERO);
         if remaining.is_zero() {
             return Err(FilteredSubrequestError::new(
-                "iterative_request_router: overall deadline exceeded".to_owned().into(),
+                "filtered_subrequest: overall deadline exceeded".to_owned().into(),
                 extensions,
             ));
         }
@@ -391,7 +391,7 @@ impl FilteredSubrequestExecutor {
             }
 
             let upstream = filter_ctx.upstream.as_ref().ok_or_else(|| -> FilterError {
-                format!("iterative_request_router: step '{label}' did not resolve an upstream").into()
+                format!("filtered_subrequest: step '{label}' did not resolve an upstream").into()
             })?;
             in_transport_inner.store(true, Ordering::Release);
             let peer = build_peer(upstream).await;
@@ -423,7 +423,7 @@ impl FilteredSubrequestExecutor {
                         crate::BodyMode::StreamBuffer { .. }
                     ) {
                         return Err(format!(
-                            "iterative_request_router: step '{label}' selected streaming with StreamBuffer response mode"
+                            "filtered_subrequest: step '{label}' selected streaming despite a StreamBuffer response mode"
                         )
                         .into());
                     }
@@ -463,7 +463,7 @@ impl FilteredSubrequestExecutor {
                                 return Ok(RawResponse::Rejected(Rejection::status(413)));
                             }
                             let metadata = filter_ctx.response_header.as_deref().ok_or_else(|| -> FilterError {
-                                "iterative_request_router: response metadata missing after header filters"
+                                "filtered_subrequest: response metadata missing after header filters"
                                     .to_owned()
                                     .into()
                             })?;
@@ -494,7 +494,7 @@ impl FilteredSubrequestExecutor {
                                 return Ok(RawResponse::Rejected(Rejection::status(413)));
                             }
                             let metadata = filter_ctx.response_header.as_deref().ok_or_else(|| -> FilterError {
-                                "iterative_request_router: response metadata missing after header filters"
+                                "filtered_subrequest: response metadata missing after header filters"
                                     .to_owned()
                                     .into()
                             })?;
@@ -558,7 +558,7 @@ impl FilteredSubrequestExecutor {
                         self.max_response_bytes,
                         body.as_ref().map_or(0, Bytes::len),
                     ) {
-                        return Err("iterative_request_router: step response exceeds configured body limit".into());
+                        return Err("filtered_subrequest: step response exceeds configured body limit".into());
                     }
                     let body_action = pipeline.execute_http_response_body(&mut filter_ctx, &mut body, true)?;
                     if let FilterAction::Reject(rejection) = body_action {
@@ -573,7 +573,7 @@ impl FilteredSubrequestExecutor {
                         body.as_ref().map_or(0, Bytes::len),
                     ) {
                         return Err(
-                            "iterative_request_router: transformed step response exceeds configured body limit"
+                            "filtered_subrequest: transformed step response exceeds configured body limit"
                                 .into(),
                         );
                     }
@@ -628,13 +628,13 @@ impl FilteredSubrequestExecutor {
                 )
                 .map_err(|error| FilteredSubrequestError::capture(error, &mut filter_ctx))?;
             if let FilterAction::Reject(_) = completion_action {
-                let error = "iterative_request_router: step completion filter rejected an abnormal stream"
+                let error = "filtered_subrequest: step completion filter rejected an abnormal stream"
                     .to_owned()
                     .into();
                 return Err(FilteredSubrequestError::capture(error, &mut filter_ctx));
             }
             if self.accounting.exceeds_limit(&filter_ctx.extensions) {
-                let error = "iterative_request_router: retained state limit exceeded during stream completion"
+                let error = "filtered_subrequest: retained state limit exceeded during stream completion"
                     .to_owned()
                     .into();
                 return Err(FilteredSubrequestError::capture(error, &mut filter_ctx));
@@ -643,7 +643,7 @@ impl FilteredSubrequestExecutor {
                 .as_ref()
                 .is_some_and(|body| body.len() > self.max_response_bytes)
             {
-                let error = "iterative_request_router: abnormal completion exceeds response body limit"
+                let error = "filtered_subrequest: abnormal completion exceeds response body limit"
                     .to_owned()
                     .into();
                 return Err(FilteredSubrequestError::capture(error, &mut filter_ctx));
