@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Praxis Contributors
 
-//! Streaming response lifecycle types for the iterative request router.
+//! Streaming response lifecycle for the iterative request router.
 //!
 //! The iterative request router runs step pipelines across multiple
 //! sub-requests. When a step's pipeline selects streaming mode,
@@ -9,19 +9,17 @@
 //! is owned by [`IrrStreamingSession`].
 //!
 //! [`IrrStreamingSession`] pulls upstream chunks through each step's
-//! response-body filters until the stream ends, then runs the step's
-//! completion lifecycle exactly once and evaluates the next transition.
-//! A matching `next` opens another step without recommitting downstream
-//! response headers.
+//! response-body filters — via the generic [`FilteredStreamingBody`] — until
+//! the stream ends, then runs the step's completion lifecycle exactly once
+//! and evaluates the next transition. A matching `next` opens another step
+//! without recommitting downstream response headers.
 //!
-//! [`StepResponseContinuation`] holds all state needed to run body
-//! filters after `on_request()` returns: the step pipeline, request
-//! and response snapshots, filter extensions, filter state, metadata,
-//! and a completion guard. The continuation owns an `Arc<FilterPipeline>`
-//! so the pipeline outlives the router filter.
+//! [`step_completion_from`] adapts the executor's caller-agnostic
+//! [`SubrequestCompletion`] into the router's [`StepCompletion`], recovering
+//! the router's [`IterationState`] and [`NextIterationBody`] from the returned
+//! extensions.
 
 use std::{
-    any::Any,
     collections::{HashMap, VecDeque},
     sync::Arc,
 };
@@ -29,14 +27,13 @@ use std::{
 use async_trait::async_trait;
 use bytes::Bytes;
 use praxis_core::subrequest::SubResponseBody;
-use tracing::warn;
 
 use crate::{
-    FilterError, FilterPipeline, IterationState, NextIterationBody, StreamTermination, StreamTerminationCause,
+    FilterError, IterationState, NextIterationBody, StreamTermination,
     actions::StreamingResponseBody,
-    context::PendingStreamChunks,
     extensions::RequestExtensions,
-    results::{FilterResultSet, RetainedFilterResults},
+    filtered_subrequest::{FilteredStreamingBody, FilteredSubrequestContinuation, SubrequestCompletion},
+    results::FilterResultSet,
 };
 
 /// State made available after a step's completion hook has run.
@@ -70,432 +67,44 @@ impl StepCompletionError {
     }
 }
 
-/// State continuation for streaming a step's response body.
+/// Adapt the executor's generic completion into the router's step vocabulary.
 ///
-/// Owns the step pipeline, request/response snapshots, and all
-/// per-filter state needed to run response-body filters after
-/// `on_request()` returns. The `Arc<FilterPipeline>` outlives
-/// the router filter, enabling body hooks to execute while the
-/// router's `on_request` has already completed.
-pub(super) struct StepResponseContinuation {
-    /// Arc-wrapped step pipeline for executing response-body filters.
-    pub(super) pipeline: Arc<FilterPipeline>,
-    /// Snapshot of the step's request for filter context reconstruction.
-    pub(super) request_snapshot: crate::Request,
-    /// Snapshot of the step's response headers for filter context reconstruction.
-    pub(super) response_snapshot: crate::Response,
-    /// Request extensions that persist across body chunks.
-    pub(super) extensions: RequestExtensions,
-    /// Per-filter state that persists across body chunks.
-    pub(super) filter_state: HashMap<usize, Box<dyn Any + Send + Sync>>,
-    /// Filter results that persist across body chunks.
-    pub(super) filter_results: HashMap<&'static str, FilterResultSet>,
-    /// Filter metadata that persists across body chunks.
-    pub(super) filter_metadata: HashMap<String, String>,
-    /// Structured metadata that persists across body chunks.
-    pub(super) structured_metadata: HashMap<String, serde_json::Value>,
-    /// Tracks which filters executed during request phase.
-    pub(super) executed_filter_indices: Vec<bool>,
-    /// Tracks which filters completed their body hooks.
-    pub(super) body_done_indices: Vec<bool>,
-    /// Accumulated response body bytes seen so far.
-    pub(super) response_body_bytes: u64,
-    /// Response body mode from pipeline capabilities.
-    pub(super) response_body_mode: crate::body::BodyMode,
-    /// Whether the completion lifecycle has run.
-    pub(super) completed: bool,
-    /// Original downstream client address for body filter context.
-    pub(super) client_addr: Option<std::net::IpAddr>,
-    /// Whether the original downstream connection uses TLS.
-    pub(super) downstream_tls: bool,
-    /// Start time of the containing client request.
-    pub(super) request_start: std::time::Instant,
-    /// Absolute deadline shared by header and body processing for this step.
-    pub(super) step_deadline: std::time::Instant,
-    /// Verified downstream mTLS identity.
-    pub(super) peer_identity: Option<Arc<praxis_tls::TlsPeerIdentity>>,
-}
-
-impl StepResponseContinuation {
-    /// Capture all owned step context after response headers have run.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "capture owns the complete response continuation boundary"
-    )]
-    pub(super) fn capture(
-        pipeline: Arc<FilterPipeline>,
-        request_snapshot: crate::Request,
-        response_snapshot: crate::Response,
-        ctx: &mut crate::filter::HttpFilterContext<'_>,
-        completed: bool,
-        step_deadline: std::time::Instant,
-    ) -> Self {
-        Self {
-            pipeline,
-            request_snapshot,
-            response_snapshot,
-            extensions: std::mem::take(&mut ctx.extensions),
-            filter_state: std::mem::take(&mut ctx.filter_state),
-            filter_results: std::mem::take(&mut ctx.filter_results),
-            filter_metadata: std::mem::take(&mut ctx.filter_metadata),
-            structured_metadata: std::mem::take(&mut ctx.structured_metadata),
-            executed_filter_indices: std::mem::take(&mut ctx.executed_filter_indices),
-            body_done_indices: std::mem::take(&mut ctx.body_done_indices),
-            response_body_bytes: ctx.response_body_bytes,
-            response_body_mode: ctx.response_body_mode,
-            completed,
-            client_addr: ctx.client_addr,
-            downstream_tls: ctx.downstream_tls,
-            request_start: ctx.request_start,
-            step_deadline,
-            peer_identity: ctx.peer_identity.clone(),
-        }
-    }
-
-    /// Recover only caller-owned extensions when an internal invariant fails.
-    pub(super) fn into_parent_extensions(mut self) -> RequestExtensions {
-        self.extensions.remove::<IterationState>();
-        self.extensions.remove::<NextIterationBody>();
-        self.extensions.remove::<PendingStreamChunks>();
-        self.extensions.remove::<RetainedFilterResults>();
-        self.extensions.remove::<StreamTermination>();
-        self.extensions
-    }
-
-    /// Consume the completed continuation into transition inputs.
-    pub(super) fn into_completion(mut self) -> Result<StepCompletion, StepCompletionError> {
-        let Some(state) = self.extensions.remove::<IterationState>() else {
-            return Err(StepCompletionError {
-                error: "iterative_request_router: iteration state missing after step completion"
-                    .to_owned()
-                    .into(),
-                extensions: self.into_parent_extensions(),
-            });
-        };
-        let next_iteration_body = self.extensions.remove::<NextIterationBody>().map(|body| body.0);
-        let pending_chunks = self
-            .extensions
-            .remove::<PendingStreamChunks>()
-            .map_or_else(VecDeque::new, PendingStreamChunks::into_chunks);
-        let termination = self.extensions.remove::<StreamTermination>();
-        let mut filter_results = self.extensions.remove::<RetainedFilterResults>().unwrap_or_default().0;
-        filter_results.extend(self.filter_results);
-        Ok(StepCompletion {
-            extensions: self.extensions,
-            filter_results,
-            next_iteration_body,
-            pending_chunks,
-            state,
-            termination,
-        })
-    }
-}
-
-/// Streaming body implementation for iterative request router steps.
-///
-/// Pulls upstream chunks through the step's response-body filters,
-/// accumulates state in the owned [`StepResponseContinuation`],
-/// and runs the step's completion lifecycle exactly once after
-/// upstream EOF.
-///
-/// The `upstream` field is `Option<SubResponseBody>` because
-/// `SubResponseBody::cancel()` consumes `self`. Standard Rust
-/// pattern: `.take()` to move it out for cancellation.
-pub(super) struct IrrStreamingBody {
-    /// Upstream streaming body handle. `None` after cancellation.
-    upstream: Option<Box<SubResponseBody>>,
-    /// Owned state for running step response-body filters.
-    continuation: StepResponseContinuation,
-    /// Whether the stream has finished (EOF or error).
-    finished: bool,
-    /// Completion-hook body output held until IRR selects a transition.
-    deferred_completion_output: Option<Bytes>,
-    /// Per-callback local output waiting to be pulled downstream.
-    pending_chunks: VecDeque<Bytes>,
-}
-
-impl IrrStreamingBody {
-    /// Create a new streaming body for a step's response.
-    pub(super) fn new(upstream: Box<SubResponseBody>, continuation: StepResponseContinuation) -> Self {
-        Self {
-            upstream: Some(upstream),
-            continuation,
-            finished: false,
-            deferred_completion_output: None,
-            pending_chunks: VecDeque::new(),
-        }
-    }
-
-    /// Consume the body wrapper after EOF and recover its owned step state.
-    pub(super) fn into_continuation(self) -> StepResponseContinuation {
-        self.continuation
-    }
-
-    /// Consume a finished body into its continuation and deferred output.
-    fn into_finished_parts(self) -> (StepResponseContinuation, Option<Bytes>) {
-        (self.continuation, self.deferred_completion_output)
-    }
-
-    /// Exchange extensions with the outer protocol lifecycle.
-    fn exchange_extensions(&mut self, extensions: &mut RequestExtensions) {
-        std::mem::swap(&mut self.continuation.extensions, extensions);
-    }
-
-    /// Run the step's response-body filters on a single chunk.
-    ///
-    /// Reconstructs a temporary `HttpFilterContext` from the
-    /// continuation's owned state, runs the pipeline's body
-    /// execution, then writes state changes back to the
-    /// continuation for the next chunk.
-    #[expect(clippy::too_many_lines, reason = "context reconstruction requires many fields")]
-    fn run_step_body_filters(&mut self, body: &mut Option<Bytes>, end_of_stream: bool) -> Result<(), FilterError> {
-        let cont = &mut self.continuation;
-        let mut ctx = crate::filter::HttpFilterContext {
-            buffered_request_body: None,
-            body_done_indices: std::mem::take(&mut cont.body_done_indices),
-            branch_iterations: HashMap::new(),
-            client_addr: cont.client_addr,
-            cluster: None,
-            current_filter_id: None,
-            downstream_tls: cont.downstream_tls,
-            extensions: std::mem::take(&mut cont.extensions),
-            executed_filter_indices: std::mem::take(&mut cont.executed_filter_indices),
-            extra_request_headers: Vec::new(),
-            filter_metadata: std::mem::take(&mut cont.filter_metadata),
-            filter_results: std::mem::take(&mut cont.filter_results),
-            filter_state: std::mem::take(&mut cont.filter_state),
-            health_registry: cont.pipeline.health_registry(),
-            id_generator: cont.pipeline.id_generator(),
-            kv_stores: cont.pipeline.kv_stores(),
-            metrics_route: None,
-            peer_identity: cont.peer_identity.clone(),
-            prior_pre_read_mutations: Vec::new(),
-            pre_read_mutations: Vec::new(),
-            request: &cont.request_snapshot,
-            request_body_bytes: 0,
-            request_body_mode: cont.pipeline.body_capabilities().request_body_mode,
-            request_headers_to_remove: Vec::new(),
-            request_headers_to_set: Vec::new(),
-            request_start: cont.request_start,
-            response_body_bytes: cont.response_body_bytes,
-            response_body_mode: cont.response_body_mode,
-            response_header: None,
-            response_headers_modified: false,
-            rewritten_path: None,
-            selected_endpoint_index: None,
-            attempted_endpoints: Vec::new(),
-            retry_policy: None,
-            route_retry_policy: None,
-            cluster_retry_state: None,
-            cluster_retry_state_released: false,
-            endpoint_reselector: None,
-            pinned_endpoint_address: None,
-            session_stores: None,
-            structured_metadata: std::mem::take(&mut cont.structured_metadata),
-            subrequest_client: cont.pipeline.subrequest_client(),
-            subrequest_response_mode: crate::context::SubRequestResponseMode::Streaming,
-            time_source: cont.pipeline.time_source(),
-            upstream: None,
-        };
-
-        let result = cont.pipeline.execute_http_response_body_with_response_header(
-            &mut ctx,
-            body,
-            end_of_stream,
-            Some(&cont.response_snapshot),
-        );
-
-        cont.body_done_indices = ctx.body_done_indices;
-        cont.executed_filter_indices = ctx.executed_filter_indices;
-        cont.extensions = ctx.extensions;
-        cont.filter_metadata = ctx.filter_metadata;
-        cont.filter_results = ctx.filter_results;
-        cont.filter_state = ctx.filter_state;
-        cont.response_body_bytes = ctx.response_body_bytes;
-        cont.structured_metadata = ctx.structured_metadata;
-
-        match result? {
-            crate::actions::FilterAction::Reject(_) => {
-                Err("iterative_request_router: step body filter rejected during stream"
-                    .to_owned()
-                    .into())
-            },
-            _ => Ok(()),
-        }
-    }
-
-    /// Run the step's completion lifecycle exactly once.
-    ///
-    /// Called after upstream EOF. Runs body filters with
-    /// `end_of_stream: true` to let them emit any buffered
-    /// completion chunk (e.g. a closing SSE comment or JSON
-    /// array bracket).
-    fn complete_step(&mut self) -> Result<Option<Bytes>, FilterError> {
-        if self.continuation.completed {
-            return Ok(None);
-        }
-        self.continuation.completed = true;
-        let mut body: Option<Bytes> = None;
-        self.run_step_body_filters(&mut body, true)?;
-        Ok(body)
-    }
-
-    /// Handle a chunk received from the upstream.
-    fn handle_upstream_chunk(&mut self, chunk: Bytes) -> Result<Option<Bytes>, FilterError> {
-        let mut body = Some(chunk);
-        self.run_step_body_filters(&mut body, false)?;
-        let emitted = self
-            .continuation
-            .extensions
-            .get_mut::<PendingStreamChunks>()
-            .map_or_else(VecDeque::new, PendingStreamChunks::drain_chunks);
-        self.pending_chunks.extend(emitted);
-        self.pending_chunks.extend(body.filter(|bytes| !bytes.is_empty()));
-        Ok(self.pending_chunks.pop_front())
-    }
-
-    /// Complete the step after a response-body filter failure.
-    async fn handle_filter_error(&mut self, error: FilterError) -> Result<Option<Bytes>, FilterError> {
-        warn!("iterative_request_router: response body filter failed: {error}");
-        if let Some(upstream_body) = self.upstream.take() {
-            (*upstream_body).cancel().await;
-        }
-        self.continuation
-            .extensions
-            .insert(StreamTermination::new(StreamTerminationCause::Filter));
-        let completion = self.complete_step().map_err(|completion_error| -> FilterError {
-            format!(
-                "iterative_request_router: response filter failed ({error}); completion also failed ({completion_error})"
-            )
-            .into()
-        })?;
-        self.finished = true;
-        self.deferred_completion_output = self.handled_completion_output(completion);
-        Ok(None)
-    }
-
-    /// Handle upstream EOF.
-    fn handle_upstream_eof(&mut self) -> Result<Option<Bytes>, FilterError> {
-        let completion = self.complete_step()?;
-        self.finished = true;
-        self.deferred_completion_output = completion.filter(|bytes| !bytes.is_empty());
-        Ok(None)
-    }
-
-    /// Handle an upstream error.
-    async fn handle_upstream_error(
-        &mut self,
-        e: praxis_core::subrequest::SubRequestError,
-    ) -> Result<Option<Bytes>, FilterError> {
-        if let Some(upstream_body) = self.upstream.take() {
-            (*upstream_body).cancel().await;
-        }
-        self.continuation
-            .extensions
-            .insert(StreamTermination::new(termination_cause(&e)));
-        let completion = self.complete_step()?;
-        self.finished = true;
-        self.deferred_completion_output = self.handled_completion_output(completion);
-        Ok(None)
-    }
-
-    /// Expose an abnormal completion body only when a filter explicitly
-    /// converted the failure into a valid terminal sequence.
-    fn handled_completion_output(&self, completion: Option<Bytes>) -> Option<Bytes> {
-        self.continuation
-            .extensions
-            .get::<StreamTermination>()
-            .is_some_and(StreamTermination::is_handled)
-            .then_some(completion)
-            .flatten()
-            .filter(|bytes| !bytes.is_empty())
-    }
-}
-
-/// Map transport detail to the provider-neutral completion classification.
-fn termination_cause(error: &praxis_core::subrequest::SubRequestError) -> StreamTerminationCause {
-    use praxis_core::subrequest::SubRequestError;
-    match error {
-        SubRequestError::AdmissionTimeout { .. } => StreamTerminationCause::AdmissionTimeout,
-        SubRequestError::CircuitOpen { .. } => StreamTerminationCause::CircuitOpen,
-        SubRequestError::Connect(_) => StreamTerminationCause::Connect,
-        SubRequestError::DeadlineExceeded => StreamTerminationCause::DeadlineExceeded,
-        SubRequestError::StreamIdleTimeout { .. } => StreamTerminationCause::IdleTimeout,
-        SubRequestError::ResponseTooLarge { .. } => StreamTerminationCause::ResponseTooLarge,
-        _ => StreamTerminationCause::Io,
-    }
-}
-
-#[async_trait]
-impl StreamingResponseBody for IrrStreamingBody {
-    #[expect(clippy::too_many_lines, reason = "pull loop applies deadlines and completion state")]
-    async fn next_chunk(&mut self) -> Result<Option<Bytes>, FilterError> {
-        if let Some(chunk) = self.pending_chunks.pop_front() {
-            return Ok(Some(chunk));
-        }
-        if self.finished {
-            return Ok(None);
-        }
-
-        loop {
-            let upstream = self.upstream.as_mut().ok_or_else(|| -> FilterError {
-                "iterative_request_router: upstream already consumed".to_owned().into()
-            })?;
-
-            let remaining = self
-                .continuation
-                .step_deadline
-                .checked_duration_since(std::time::Instant::now())
-                .unwrap_or_default();
-            let next = if remaining.is_zero() {
-                Err(praxis_core::subrequest::SubRequestError::DeadlineExceeded)
-            } else {
-                tokio::time::timeout(remaining, upstream.next_chunk())
-                    .await
-                    .unwrap_or(Err(praxis_core::subrequest::SubRequestError::DeadlineExceeded))
-            };
-
-            match next {
-                Ok(Some(chunk)) => match self.handle_upstream_chunk(chunk) {
-                    Ok(Some(bytes)) => return Ok(Some(bytes)),
-                    Ok(None) => {},
-                    Err(error) => return Box::pin(self.handle_filter_error(error)).await,
-                },
-                Ok(None) => return self.handle_upstream_eof(),
-                Err(e) => return Box::pin(self.handle_upstream_error(e)).await,
-            }
-        }
-    }
-
-    async fn suppress(&mut self) -> Result<(), FilterError> {
-        if !self.finished {
-            self.finished = true;
-            if let Some(upstream_body) = self.upstream.take() {
-                (*upstream_body).cancel().await;
-            }
-            self.complete_step()?;
-        }
-        Ok(())
-    }
-
-    async fn cancel(&mut self) {
-        if !self.finished {
-            self.finished = true;
-            if let Some(upstream_body) = self.upstream.take() {
-                (*upstream_body).cancel().await;
-            }
-        }
-    }
-
-    fn swap_extensions(&mut self, extensions: &mut RequestExtensions) {
-        self.exchange_extensions(extensions);
-    }
+/// The generic [`SubrequestCompletion`] already lifted the executor-owned
+/// mechanisms into typed fields and left caller-injected types in its
+/// extensions. This recovers the router's [`IterationState`] and
+/// [`NextIterationBody`]; a missing iteration state is a lifecycle error whose
+/// recoverable extensions have both router-owned types stripped, matching the
+/// parent-facing end state of every other exit path.
+pub(super) fn step_completion_from(completion: SubrequestCompletion) -> Result<StepCompletion, StepCompletionError> {
+    let SubrequestCompletion {
+        mut extensions,
+        filter_results,
+        pending_chunks,
+        termination,
+    } = completion;
+    let Some(state) = extensions.remove::<IterationState>() else {
+        return Err(StepCompletionError {
+            error: "iterative_request_router: iteration state missing after step completion"
+                .to_owned()
+                .into(),
+            extensions: super::strip_iteration_extensions(extensions),
+        });
+    };
+    let next_iteration_body = extensions.remove::<NextIterationBody>().map(|body| body.0);
+    Ok(StepCompletion {
+        extensions,
+        filter_results,
+        next_iteration_body,
+        pending_chunks,
+        state,
+        termination,
+    })
 }
 
 /// A committed logical response that can span multiple IRR steps.
 pub(super) struct IrrStreamingSession {
     /// Active step body, when a streamed step is being consumed.
-    current: Option<IrrStreamingBody>,
+    current: Option<FilteredStreamingBody>,
     /// Outcome corresponding to `current`.
     current_outcome: Option<super::StepOutcome>,
     /// Request inherited or replaced for the current step.
@@ -540,14 +149,14 @@ impl IrrStreamingSession {
         current_request: crate::SubRequest,
         outcome: super::StepOutcome,
         body: Box<SubResponseBody>,
-        continuation: StepResponseContinuation,
+        continuation: FilteredSubrequestContinuation,
         pending_chunks: VecDeque<Bytes>,
         step_transitions: HashMap<Arc<str>, Vec<super::config::StepTransition>>,
         max_state_bytes: usize,
         max_stream_response_bytes: Option<usize>,
     ) -> Self {
         Self {
-            current: Some(IrrStreamingBody::new(body, continuation)),
+            current: Some(FilteredStreamingBody::new(body, continuation)),
             current_outcome: Some(outcome),
             current_request,
             current_step,
@@ -692,7 +301,7 @@ impl IrrStreamingSession {
             .take()
             .ok_or_else(|| -> FilterError { "iterative_request_router: current stream missing at EOF".into() })?;
         let (continuation, completion_output) = current.into_finished_parts();
-        let completion = match continuation.into_completion() {
+        let completion = match step_completion_from(continuation.into_completion()) {
             Ok(completion) => completion,
             Err(error) => {
                 let (error, restored_extensions) = error.into_parts();
@@ -750,7 +359,7 @@ impl IrrStreamingSession {
             super::runner::OpenedStepKind::Streaming { body, outcome } => {
                 if !super::streaming_transition_order_is_valid(self.transitions()) {
                     (*body).cancel().await;
-                    self.extensions = Some(continuation.into_parent_extensions());
+                    self.extensions = Some(super::strip_iteration_extensions(continuation.into_parent_extensions()));
                     self.state = Some(state);
                     return Err(format!(
                         "iterative_request_router: step '{}' selected streaming with interleaved transition phases",
@@ -760,13 +369,15 @@ impl IrrStreamingSession {
                 }
                 match super::evaluate_header_transitions(self.transitions(), &outcome) {
                     super::TransitionResult::Next(next) => {
-                        let mut skipped = IrrStreamingBody::new(body, continuation);
+                        let mut skipped = FilteredStreamingBody::new(body, continuation);
                         if let Err(error) = skipped.suppress().await {
-                            self.extensions = Some(skipped.into_continuation().into_parent_extensions());
+                            self.extensions = Some(super::strip_iteration_extensions(
+                                skipped.into_continuation().into_parent_extensions(),
+                            ));
                             self.state = Some(state);
                             return Err(error);
                         }
-                        let mut completion = match skipped.into_continuation().into_completion() {
+                        let mut completion = match step_completion_from(skipped.into_continuation().into_completion()) {
                             Ok(completion) => completion,
                             Err(error) => {
                                 let (error, restored_extensions) = error.into_parts();
@@ -799,13 +410,13 @@ impl IrrStreamingSession {
                         self.next_step = Some(next);
                     },
                     super::TransitionResult::Done | super::TransitionResult::NoMatch => {
-                        self.current = Some(IrrStreamingBody::new(body, continuation));
+                        self.current = Some(FilteredStreamingBody::new(body, continuation));
                         self.current_outcome = Some(outcome);
                     },
                 }
             },
             super::runner::OpenedStepKind::Complete(outcome) => {
-                let completion = match continuation.into_completion() {
+                let completion = match step_completion_from(continuation.into_completion()) {
                     Ok(completion) => completion,
                     Err(error) => {
                         let (error, restored_extensions) = error.into_parts();

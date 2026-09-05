@@ -51,6 +51,7 @@ mod error_response;
 mod extensions;
 mod factory;
 mod filter;
+mod filtered_subrequest;
 pub(crate) mod load_balancing;
 mod metrics;
 pub(crate) mod path_match;
