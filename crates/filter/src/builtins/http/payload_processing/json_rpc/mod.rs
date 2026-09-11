@@ -272,10 +272,7 @@ fn promote_checked(
 /// (body-derived) values are added. The mutation pipeline applies
 /// removes before adds, so the promoted values replace — not
 /// coexist with — forged client copies.
-fn strip_promotion_headers(
-    config: &JsonRpcConfig,
-    headers_to_remove: &mut Vec<http::header::HeaderName>,
-) {
+fn strip_promotion_headers(config: &JsonRpcConfig, headers_to_remove: &mut Vec<http::header::HeaderName>) {
     for name in [
         config.headers.method.as_ref(),
         config.headers.id.as_ref(),
@@ -284,11 +281,10 @@ fn strip_promotion_headers(
     .into_iter()
     .flatten()
     {
-        {
-            match http::header::HeaderName::from_bytes(name.as_bytes()) {
-                Ok(header_name) => headers_to_remove.push(header_name),
-                Err(_) => warn!(header = %name, "cannot strip promotion header: invalid header name"),
-            }
+        if let Ok(header_name) = http::header::HeaderName::from_bytes(name.as_bytes()) {
+            headers_to_remove.push(header_name);
+        } else {
+            warn!(header = %name, "cannot strip promotion header: invalid header name");
         }
     }
 }

@@ -1293,7 +1293,7 @@ async fn strips_forged_headers_on_valid_json_rpc() {
     let remove_names: Vec<&str> = ctx
         .request_headers_to_remove
         .iter()
-        .map(|h| h.as_str())
+        .map(http::HeaderName::as_str)
         .collect();
     assert!(
         remove_names.contains(&"x-json-rpc-method"),
@@ -1334,7 +1334,7 @@ async fn strips_forged_headers_on_non_json_rpc_body() {
     let remove_names: Vec<&str> = ctx
         .request_headers_to_remove
         .iter()
-        .map(|h| h.as_str())
+        .map(http::HeaderName::as_str)
         .collect();
     assert!(
         remove_names.contains(&"x-json-rpc-method"),
@@ -1369,7 +1369,7 @@ async fn strips_forged_headers_on_none_body() {
     let remove_names: Vec<&str> = ctx
         .request_headers_to_remove
         .iter()
-        .map(|h| h.as_str())
+        .map(http::HeaderName::as_str)
         .collect();
     assert!(
         remove_names.contains(&"x-json-rpc-method"),
@@ -1403,20 +1403,14 @@ async fn strips_forged_headers_with_custom_header_names() {
     let remove_names: Vec<&str> = ctx
         .request_headers_to_remove
         .iter()
-        .map(|h| h.as_str())
+        .map(http::HeaderName::as_str)
         .collect();
-    assert!(
-        remove_names.contains(&"x-custom-method"),
-        "custom method header should be stripped: {remove_names:?}"
-    );
-    assert!(
-        remove_names.contains(&"x-custom-id"),
-        "custom id header should be stripped: {remove_names:?}"
-    );
-    assert!(
-        remove_names.contains(&"x-custom-kind"),
-        "custom kind header should be stripped: {remove_names:?}"
-    );
+    for expected in ["x-custom-method", "x-custom-id", "x-custom-kind"] {
+        assert!(
+            remove_names.contains(&expected),
+            "custom header {expected} should be stripped: {remove_names:?}"
+        );
+    }
 }
 
 #[tokio::test]
