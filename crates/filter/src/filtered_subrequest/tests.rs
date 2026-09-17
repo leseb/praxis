@@ -932,6 +932,203 @@ impl crate::HttpFilter for SelectedUpstreamExpandFilter {
     }
 }
 
+// Selects a fixed upstream in `on_request` (no load balancer) and records the
+// selected-application provider observed during the selected-upstream phase, so
+// a test can assert metadata isolation from the reader's point of view.
+struct SelectedProviderRecorderFilter {
+    upstream_addr: std::net::SocketAddr,
+    seen: std::sync::Arc<std::sync::Mutex<Option<Option<String>>>>,
+    // When set, published as this step's provider during `on_request`, exercising
+    // the staged-upstream clear (a value published for a discarded selection).
+    publish: Option<&'static str>,
+}
+
+#[async_trait::async_trait]
+impl crate::HttpFilter for SelectedProviderRecorderFilter {
+    fn name(&self) -> &'static str {
+        "test_selected_provider_recorder"
+    }
+
+    async fn on_request(
+        &self,
+        ctx: &mut crate::HttpFilterContext<'_>,
+    ) -> Result<crate::FilterAction, crate::FilterError> {
+        ctx.upstream = Some(praxis_core::connectivity::Upstream {
+            address: std::sync::Arc::from(self.upstream_addr.to_string().as_str()),
+            authority: None,
+            connection: std::sync::Arc::new(praxis_core::connectivity::ConnectionOptions::default()),
+            tls: None,
+        });
+        if let Some(provider) = self.publish {
+            ctx.publish_selected_application(None, Some(std::sync::Arc::from(provider)));
+        }
+        Ok(crate::FilterAction::Continue)
+    }
+
+    fn selected_upstream_request_body_access(&self) -> crate::BodyAccess {
+        crate::BodyAccess::ReadOnly
+    }
+
+    fn request_body_mode(&self) -> crate::BodyMode {
+        crate::BodyMode::StreamBuffer { max_bytes: Some(4096) }
+    }
+
+    async fn on_selected_upstream_request_body(
+        &self,
+        ctx: &mut crate::HttpFilterContext<'_>,
+        _body: &mut Option<bytes::Bytes>,
+    ) -> Result<crate::SelectedUpstreamBodyOutcome, crate::FilterError> {
+        *self.seen.lock().unwrap() = Some(ctx.selected_application_provider().map(str::to_owned));
+        Ok(crate::SelectedUpstreamBodyOutcome::Continue)
+    }
+}
+
+#[tokio::test]
+#[expect(clippy::large_futures, reason = "drives the full executor future in a test")]
+async fn selected_upstream_phase_does_not_inherit_parent_provider() {
+    use std::{
+        sync::{Arc, Mutex},
+        time::{Duration, Instant},
+    };
+
+    use praxis_core::subrequest::{SubRequestClient, SubRequestConnector};
+
+    // A live backend so the dial succeeds; the assertion is on what the reader
+    // observed, not the response.
+    let (addr, backend) = spawn_raw_backend("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").await;
+    let seen: Arc<Mutex<Option<Option<String>>>> = Arc::new(Mutex::new(None));
+
+    let seen_factory = Arc::clone(&seen);
+    let mut registry = crate::FilterRegistry::with_builtins();
+    registry
+        .register(
+            "test_selected_provider_recorder",
+            crate::FilterFactory::Http(Arc::new(move |_| {
+                Ok(Box::new(SelectedProviderRecorderFilter {
+                    upstream_addr: addr,
+                    seen: Arc::clone(&seen_factory),
+                    publish: None,
+                }))
+            })),
+        )
+        .unwrap();
+    let mut entries: Vec<crate::FilterEntry> =
+        serde_yaml::from_str("- filter: test_selected_provider_recorder").unwrap();
+    let pipeline = Arc::new(crate::FilterPipeline::build(&mut entries, &registry).unwrap());
+
+    let client = SubRequestClient::new(SubRequestConnector::new(1, None));
+    let downstream = crate::SubrequestRuntime::new(None, false, None, Instant::now());
+    let executor =
+        crate::FilteredSubrequestExecutor::for_callout(client, downstream, 0, 1_048_576, Duration::from_secs(5));
+
+    // The parent hands down a selected-application provider. The child must NOT
+    // observe it (decision B: entry clear).
+    let mut extensions = crate::RequestExtensions::default();
+    extensions.insert(
+        crate::extensions::SelectedClusterApplication::new(None, Some(Arc::from("parent-provider"))).unwrap(),
+    );
+
+    let request = crate::SubRequest {
+        method: http::Method::POST,
+        uri: http::Uri::from_static("/"),
+        headers: HeaderMap::new(),
+        body: bytes::Bytes::from_static(b"body"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    drop(executor.run(&pipeline, &request, extensions, deadline).await);
+    backend.abort();
+
+    assert_eq!(
+        *seen.lock().unwrap(),
+        Some(None),
+        "the child must not inherit the parent's selected-application provider"
+    );
+}
+
+#[tokio::test]
+#[expect(clippy::large_futures, reason = "drives the full executor future in a test")]
+async fn staged_upstream_clears_discarded_selection_metadata() {
+    use std::{
+        sync::{Arc, Mutex},
+        time::{Duration, Instant},
+    };
+
+    use praxis_core::subrequest::{SubRequestClient, SubRequestConnector};
+
+    let (addr, backend) = spawn_raw_backend("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").await;
+    let seen: Arc<Mutex<Option<Option<String>>>> = Arc::new(Mutex::new(None));
+
+    // The recorder publishes a provider during on_request; a staged upstream
+    // discards any load-balancer selection, so the phase must read no provider
+    // (Correction 2). The recorder still sets ctx.upstream, but the staged
+    // upstream is what is re-pinned before the phase.
+    let seen_factory = Arc::clone(&seen);
+    let mut registry = crate::FilterRegistry::with_builtins();
+    registry
+        .register(
+            "test_selected_provider_recorder",
+            crate::FilterFactory::Http(Arc::new(move |_| {
+                Ok(Box::new(SelectedProviderRecorderFilter {
+                    upstream_addr: addr,
+                    seen: Arc::clone(&seen_factory),
+                    publish: Some("discarded-provider"),
+                }))
+            })),
+        )
+        .unwrap();
+    let mut entries: Vec<crate::FilterEntry> =
+        serde_yaml::from_str("- filter: test_selected_provider_recorder").unwrap();
+    let pipeline = Arc::new(crate::FilterPipeline::build(&mut entries, &registry).unwrap());
+
+    let client = SubRequestClient::new(SubRequestConnector::new(1, None));
+    let downstream = crate::SubrequestRuntime::new(None, false, None, Instant::now());
+    let executor =
+        crate::FilteredSubrequestExecutor::for_callout(client, downstream, 0, 1_048_576, Duration::from_secs(5));
+
+    let staged = super::StagedUpstream(praxis_core::connectivity::Upstream {
+        address: Arc::from(addr.to_string().as_str()),
+        authority: None,
+        connection: Arc::new(praxis_core::connectivity::ConnectionOptions::default()),
+        tls: None,
+    });
+    let mut extensions = crate::RequestExtensions::default();
+    extensions.insert(staged);
+
+    let request = crate::SubRequest {
+        method: http::Method::POST,
+        uri: http::Uri::from_static("/"),
+        headers: HeaderMap::new(),
+        body: bytes::Bytes::from_static(b"body"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    drop(executor.run(&pipeline, &request, extensions, deadline).await);
+    backend.abort();
+
+    assert_eq!(
+        *seen.lock().unwrap(),
+        Some(None),
+        "a staged upstream must clear metadata published for the discarded selection"
+    );
+}
+
+#[test]
+fn error_into_parts_scrubs_selected_application() {
+    use std::sync::Arc;
+
+    // Direction-2 exit scrub (Correction 1): an error leaving `execute` must not
+    // carry the child's selected-application metadata back to the parent.
+    let mut extensions = crate::RequestExtensions::default();
+    extensions.insert(crate::extensions::SelectedClusterApplication::new(None, Some(Arc::from("leak"))).unwrap());
+    let error = super::FilteredSubrequestError::new("boom".to_owned().into(), extensions);
+    let (_error, extensions) = error.into_parts();
+    assert!(
+        extensions.get::<crate::extensions::SelectedClusterApplication>().is_none(),
+        "into_parts must scrub SelectedClusterApplication before returning extensions to the parent"
+    );
+}
+
 #[tokio::test]
 #[expect(clippy::large_futures, reason = "drives the full executor future in a test")]
 async fn run_re_pins_staged_upstream_over_chain_filter_rewrite() {

@@ -85,7 +85,7 @@ use crate::{
     actions::Rejection,
     context::PendingStreamChunks,
     credentials::{PendingCredentials, ResolvedDestination},
-    extensions::RequestExtensions,
+    extensions::{RequestExtensions, SelectedClusterApplication},
     results::RetainedFilterResults,
 };
 
@@ -275,7 +275,10 @@ impl FilteredSubrequestError {
     /// callers (the iterative request router's `IrrStepRunner`) keep their
     /// existing behavior, while callers that need the classification read it
     /// through [`too_large`](Self::too_large) first.
-    pub(crate) fn into_parts(self) -> (FilterError, RequestExtensions) {
+    pub(crate) fn into_parts(mut self) -> (FilterError, RequestExtensions) {
+        // #1138 Correction 1: never leak the child's selected-cluster application
+        // metadata back to the parent on any error path.
+        self.extensions.remove::<SelectedClusterApplication>();
         (self.error, self.extensions)
     }
 }
@@ -880,6 +883,10 @@ impl FilteredSubrequestExecutor {
         };
         let mut filter_ctx = build_sub_filter_context(pipeline, &sub_req, resources);
         filter_ctx.extensions = std::mem::take(&mut extensions);
+        // #1138 decision B: a child must not inherit the parent's selected-cluster
+        // application metadata. `run`/`run_classified` thread the caller's
+        // extensions straight in (unlike the IRR, which clears at step entry).
+        filter_ctx.extensions.remove::<SelectedClusterApplication>();
         filter_ctx.extensions.insert(RetainedFilterResults::default());
         filter_ctx.enable_stream_chunk_emission(self.max_state_bytes);
         // A callout may stage a pre-resolved upstream (for example a URL prepared
@@ -977,6 +984,11 @@ impl FilteredSubrequestExecutor {
             // itself — can only ever reach the authority it was prepared for.
             if let Some(upstream) = &pinned_upstream {
                 filter_ctx.upstream = Some(upstream.clone());
+                // #1138 Correction 2: a staged upstream carries no application
+                // metadata. Any value a chain filter published for the discarded
+                // load-balancer selection would misdescribe the pinned
+                // destination, so the body phase must not read it.
+                filter_ctx.extensions.remove::<SelectedClusterApplication>();
             }
 
             // #1138: selected-upstream request-body phase. Mirrors the Pingora
