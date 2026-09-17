@@ -17,8 +17,8 @@ use praxis_filter::{
     Rejection, SelectedUpstreamBodyOutcome,
 };
 use praxis_test_utils::{
-    free_port, http_post, http_send, parse_body, parse_status, start_echo_backend,
-    start_full_proxy_with_registry, start_header_echo_backend,
+    free_port, http_post, http_send, parse_body, parse_status, start_echo_backend, start_full_proxy_with_registry,
+    start_header_echo_backend,
 };
 
 // -----------------------------------------------------------------------------
@@ -218,7 +218,11 @@ filter_chains:
     // Exactly one marker proves the phase ran once in the step and its adapted
     // output is what the step forwarded upstream.
     assert_eq!(body, "hello|adapted", "the step forwards the adapted body");
-    assert_eq!(body.matches("|adapted").count(), 1, "the phase runs exactly once per step");
+    assert_eq!(
+        body.matches("|adapted").count(),
+        1,
+        "the phase runs exactly once per step"
+    );
 }
 
 #[test]
@@ -279,7 +283,10 @@ filter_chains:
         lines[0]
     );
     assert!(
-        !echoed.to_ascii_lowercase().lines().any(|l| l.trim_start().starts_with("transfer-encoding:")),
+        !echoed
+            .to_ascii_lowercase()
+            .lines()
+            .any(|l| l.trim_start().starts_with("transfer-encoding:")),
         "transfer-encoding must not survive alongside the stamped content-length:\n{echoed}"
     );
 }
@@ -509,5 +516,8 @@ filter_chains:
 
     let (status, _body) = http_post(proxy.addr(), "/echo", "tiny");
 
-    assert_eq!(status, 413, "adapted output over the effective limit is rejected with 413");
+    assert_eq!(
+        status, 413,
+        "adapted output over the effective limit is rejected with 413"
+    );
 }

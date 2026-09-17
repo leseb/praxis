@@ -884,7 +884,9 @@ impl crate::HttpFilter for SelectedUpstreamRejectFilter {
         _ctx: &mut crate::HttpFilterContext<'_>,
         _body: &mut Option<bytes::Bytes>,
     ) -> Result<crate::SelectedUpstreamBodyOutcome, crate::FilterError> {
-        Ok(crate::SelectedUpstreamBodyOutcome::Reject(crate::Rejection::status(403)))
+        Ok(crate::SelectedUpstreamBodyOutcome::Reject(crate::Rejection::status(
+            403,
+        )))
     }
 }
 
@@ -937,6 +939,10 @@ impl crate::HttpFilter for SelectedUpstreamExpandFilter {
 // a test can assert metadata isolation from the reader's point of view.
 struct SelectedProviderRecorderFilter {
     upstream_addr: std::net::SocketAddr,
+    #[expect(
+        clippy::option_option,
+        reason = "three observation states: phase not run / run without provider / run with provider"
+    )]
     seen: std::sync::Arc<std::sync::Mutex<Option<Option<String>>>>,
     // When set, published as this step's provider during `on_request`, exercising
     // the staged-upstream clear (a value published for a discarded selection).
@@ -1024,9 +1030,8 @@ async fn selected_upstream_phase_does_not_inherit_parent_provider() {
     // The parent hands down a selected-application provider. The child must NOT
     // observe it (decision B: entry clear).
     let mut extensions = crate::RequestExtensions::default();
-    extensions.insert(
-        crate::extensions::SelectedClusterApplication::new(None, Some(Arc::from("parent-provider"))).unwrap(),
-    );
+    extensions
+        .insert(crate::extensions::SelectedClusterApplication::new(None, Some(Arc::from("parent-provider"))).unwrap());
 
     let request = crate::SubRequest {
         method: http::Method::POST,
@@ -1124,7 +1129,9 @@ fn error_into_parts_scrubs_selected_application() {
     let error = super::FilteredSubrequestError::new("boom".to_owned().into(), extensions);
     let (_error, extensions) = error.into_parts();
     assert!(
-        extensions.get::<crate::extensions::SelectedClusterApplication>().is_none(),
+        extensions
+            .get::<crate::extensions::SelectedClusterApplication>()
+            .is_none(),
         "into_parts must scrub SelectedClusterApplication before returning extensions to the parent"
     );
 }
@@ -1172,7 +1179,9 @@ fn into_parent_extensions_scrubs_selected_application() {
 
     let extensions = continuation.into_parent_extensions();
     assert!(
-        extensions.get::<crate::extensions::SelectedClusterApplication>().is_none(),
+        extensions
+            .get::<crate::extensions::SelectedClusterApplication>()
+            .is_none(),
         "into_parent_extensions must scrub SelectedClusterApplication before returning extensions to the parent"
     );
 }
@@ -1220,7 +1229,10 @@ fn into_completion_scrubs_selected_application() {
 
     let completion = continuation.into_completion();
     assert!(
-        completion.extensions.get::<crate::extensions::SelectedClusterApplication>().is_none(),
+        completion
+            .extensions
+            .get::<crate::extensions::SelectedClusterApplication>()
+            .is_none(),
         "into_completion must scrub SelectedClusterApplication before returning extensions to the parent"
     );
 }
@@ -3037,8 +3049,7 @@ async fn selected_upstream_reject_short_circuits_before_dialing() {
             })),
         )
         .unwrap();
-    let mut entries: Vec<crate::FilterEntry> =
-        serde_yaml::from_str("- filter: test_selected_upstream_reject").unwrap();
+    let mut entries: Vec<crate::FilterEntry> = serde_yaml::from_str("- filter: test_selected_upstream_reject").unwrap();
     let pipeline = Arc::new(crate::FilterPipeline::build(&mut entries, &registry).unwrap());
 
     let client = SubRequestClient::new(SubRequestConnector::new(1, None));
@@ -3096,8 +3107,7 @@ async fn selected_upstream_oversized_output_is_rejected_with_413() {
             })),
         )
         .unwrap();
-    let mut entries: Vec<crate::FilterEntry> =
-        serde_yaml::from_str("- filter: test_selected_upstream_expand").unwrap();
+    let mut entries: Vec<crate::FilterEntry> = serde_yaml::from_str("- filter: test_selected_upstream_expand").unwrap();
     let pipeline = Arc::new(crate::FilterPipeline::build(&mut entries, &registry).unwrap());
 
     let client = SubRequestClient::new(SubRequestConnector::new(1, None));

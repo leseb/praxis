@@ -1231,11 +1231,10 @@ mod tests {
     use std::net::IpAddr;
 
     use http::{HeaderMap, Method, Uri};
-    use praxis_core::config::FailureMode;
+    use praxis_core::config::{ABSOLUTE_MAX_BODY_BYTES, FailureMode};
     use praxis_filter::FilterRegistry;
 
     use super::*;
-    use praxis_core::config::ABSOLUTE_MAX_BODY_BYTES;
 
     #[tokio::test]
     async fn empty_pipeline_continues() {

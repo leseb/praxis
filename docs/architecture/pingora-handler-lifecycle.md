@@ -202,6 +202,16 @@ separate `adapted_request_body`,
 `adapted_request_body_len` fields; the canonical
 `pre_read_body` is left untouched.
 
+The selected-upstream request-body phase also runs
+inside `FilteredSubrequestExecutor::execute` for
+direct callouts and every IRR iteration, after
+upstream selection and before dialing. The adapted
+body is what the subrequest forwards (framing
+recomputed by the transport).
+`SelectedClusterApplication` metadata is isolated per
+execution: cleared at child entry, after a staged
+re-pin, and scrubbed on every child→parent return.
+
 Source: `request_filter/mod.rs`,
 `request_filter/validation.rs`,
 `request_filter/stream_buffer.rs`, `normalize.rs`,
