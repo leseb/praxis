@@ -82,6 +82,7 @@ mod route_templates;
 mod routing;
 mod security;
 mod selected_upstream_body;
+mod selected_upstream_body_subrequests;
 mod sni_router;
 mod stats_admin;
 mod stream_buffer_adapter;
