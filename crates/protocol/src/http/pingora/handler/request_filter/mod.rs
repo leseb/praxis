@@ -228,23 +228,10 @@ pub(in crate::http) async fn execute(
 
 /// Resolve the effective request-body limit for the selected-upstream phase.
 ///
-/// The adapted output is checked against the merged `StreamBuffer` limit clamped
-/// to the listener ceiling — the same bound that governed the canonical pre-read
-/// — never an individual filter's limit. `min` keeps this correct whether or not
-/// `request_body_mode` is already clamped at pipeline build.
+/// Delegates to [`FilterPipeline::selected_upstream_request_body_limit`] so the
+/// Pingora and filtered-subrequest paths share one definition of the limit.
 fn selected_upstream_body_limit(pipeline: &FilterPipeline) -> usize {
-    let mode_limit = match pipeline.body_capabilities().request_body_mode {
-        BodyMode::StreamBuffer { max_bytes } => max_bytes.unwrap_or(ABSOLUTE_MAX_BODY_BYTES),
-        // Defensive default: selected-upstream participation always merges the
-        // request-body mode to StreamBuffer (see `selected_upstream_body_mode`
-        // in crates/filter/src/pipeline/body.rs), so this arm is not reachable
-        // for the phase; it keeps the limit well-defined if that ever changes.
-        BodyMode::SizeLimit { max_bytes } => max_bytes,
-        _ => ABSOLUTE_MAX_BODY_BYTES,
-    };
-    pipeline
-        .request_body_ceiling()
-        .map_or(mode_limit, |ceiling| mode_limit.min(ceiling))
+    pipeline.selected_upstream_request_body_limit()
 }
 
 /// Store the adapted selected-upstream request body (#1139).
@@ -1992,6 +1979,16 @@ mod tests {
             selected_upstream_body_limit(&pipeline),
             1024,
             "the listener ceiling (1024) must override the filter's StreamBuffer max (4096)"
+        );
+    }
+
+    #[test]
+    fn selected_upstream_body_limit_delegates_to_pipeline_method() {
+        let pipeline = empty_pipeline();
+        assert_eq!(
+            selected_upstream_body_limit(&pipeline),
+            pipeline.selected_upstream_request_body_limit(),
+            "the Pingora free fn must delegate to the shared FilterPipeline method"
         );
     }
 

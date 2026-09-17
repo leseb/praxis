@@ -257,6 +257,27 @@ impl FilterPipeline {
         self.request_body_ceiling
     }
 
+    /// Effective request-body byte limit for the selected-upstream phase.
+    ///
+    /// The adapted output is checked against the merged `StreamBuffer` limit
+    /// clamped to the listener ceiling — the same bound that governed the
+    /// canonical pre-read — never an individual filter's limit. `min` keeps this
+    /// correct whether or not `request_body_mode` is already clamped at build.
+    #[must_use]
+    pub fn selected_upstream_request_body_limit(&self) -> usize {
+        let mode_limit = match self.body_capabilities().request_body_mode {
+            BodyMode::StreamBuffer { max_bytes } => max_bytes.unwrap_or(ABSOLUTE_MAX_BODY_BYTES),
+            // Defensive default: selected-upstream participation always merges the
+            // request-body mode to StreamBuffer (see `selected_upstream_body_mode`
+            // in crates/filter/src/pipeline/body.rs), so this arm is not reachable
+            // for the phase; it keeps the limit well-defined if that ever changes.
+            BodyMode::SizeLimit { max_bytes } => max_bytes,
+            _ => ABSOLUTE_MAX_BODY_BYTES,
+        };
+        self.request_body_ceiling()
+            .map_or(mode_limit, |ceiling| mode_limit.min(ceiling))
+    }
+
     /// Global response body ceiling; `None` means unbounded was allowed.
     #[must_use]
     pub fn response_body_ceiling(&self) -> Option<usize> {
