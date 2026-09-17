@@ -978,6 +978,35 @@ impl FilteredSubrequestExecutor {
             if let Some(upstream) = &pinned_upstream {
                 filter_ctx.upstream = Some(upstream.clone());
             }
+
+            // #1138: selected-upstream request-body phase. Mirrors the Pingora
+            // path (crates/protocol .../request_filter/mod.rs run_pipeline): after
+            // upstream selection and the staged re-pin, run any selected-upstream
+            // body filters over the buffered body before dialing. `request_body`
+            // is a step-local clone of `current_request.body`, so the adapted
+            // bytes flow into the SubRequest (built below) without disturbing the
+            // canonical iteration input (D5). The transport reframes from the
+            // adapted bytes, so no explicit Content-Length stamping is needed.
+            // Gated on participation and a selected upstream.
+            if pipeline.body_capabilities().needs_selected_upstream_request_body
+                && filter_ctx.upstream.is_some()
+            {
+                let action = pipeline
+                    .execute_http_selected_upstream_request_body(&mut filter_ctx, &mut request_body)
+                    .await?;
+                if let FilterAction::Reject(rejection) = action {
+                    return Ok(RawResponse::Rejected(rejection));
+                }
+                // A 413 is only meaningful when a writer may have grown the body;
+                // check against the same listener-clamped limit as every path.
+                if pipeline.body_capabilities().any_selected_upstream_request_body_writer
+                    && request_body.as_ref().map_or(0, Bytes::len)
+                        > pipeline.selected_upstream_request_body_limit()
+                {
+                    return Ok(RawResponse::Rejected(Rejection::status(413)));
+                }
+            }
+
             let upstream = filter_ctx.upstream.as_ref().ok_or_else(|| -> FilterError {
                 format!("filtered_subrequest: step '{label}' did not resolve an upstream").into()
             })?;

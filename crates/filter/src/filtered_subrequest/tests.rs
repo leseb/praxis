@@ -841,6 +841,97 @@ impl crate::HttpFilter for UpstreamHijackFilter {
     }
 }
 
+// -----------------------------------------------------------------------------
+// Test Utilities: selected-upstream request-body participants
+// -----------------------------------------------------------------------------
+
+// Selects a fixed upstream in `on_request` (so the selected-upstream phase runs
+// without a load balancer) and rejects during the phase, letting a test assert a
+// rejection short-circuits before any dial.
+struct SelectedUpstreamRejectFilter {
+    upstream_addr: std::net::SocketAddr,
+}
+
+#[async_trait::async_trait]
+impl crate::HttpFilter for SelectedUpstreamRejectFilter {
+    fn name(&self) -> &'static str {
+        "test_selected_upstream_reject"
+    }
+
+    async fn on_request(
+        &self,
+        ctx: &mut crate::HttpFilterContext<'_>,
+    ) -> Result<crate::FilterAction, crate::FilterError> {
+        ctx.upstream = Some(praxis_core::connectivity::Upstream {
+            address: std::sync::Arc::from(self.upstream_addr.to_string().as_str()),
+            authority: None,
+            connection: std::sync::Arc::new(praxis_core::connectivity::ConnectionOptions::default()),
+            tls: None,
+        });
+        Ok(crate::FilterAction::Continue)
+    }
+
+    fn selected_upstream_request_body_access(&self) -> crate::BodyAccess {
+        crate::BodyAccess::ReadOnly
+    }
+
+    fn request_body_mode(&self) -> crate::BodyMode {
+        crate::BodyMode::StreamBuffer { max_bytes: Some(4096) }
+    }
+
+    async fn on_selected_upstream_request_body(
+        &self,
+        _ctx: &mut crate::HttpFilterContext<'_>,
+        _body: &mut Option<bytes::Bytes>,
+    ) -> Result<crate::SelectedUpstreamBodyOutcome, crate::FilterError> {
+        Ok(crate::SelectedUpstreamBodyOutcome::Reject(crate::Rejection::status(403)))
+    }
+}
+
+// Selects a fixed upstream in `on_request` and grows the body beyond the
+// declared StreamBuffer limit during the phase, letting a test assert a 413.
+struct SelectedUpstreamExpandFilter {
+    upstream_addr: std::net::SocketAddr,
+    output: &'static [u8],
+}
+
+#[async_trait::async_trait]
+impl crate::HttpFilter for SelectedUpstreamExpandFilter {
+    fn name(&self) -> &'static str {
+        "test_selected_upstream_expand"
+    }
+
+    async fn on_request(
+        &self,
+        ctx: &mut crate::HttpFilterContext<'_>,
+    ) -> Result<crate::FilterAction, crate::FilterError> {
+        ctx.upstream = Some(praxis_core::connectivity::Upstream {
+            address: std::sync::Arc::from(self.upstream_addr.to_string().as_str()),
+            authority: None,
+            connection: std::sync::Arc::new(praxis_core::connectivity::ConnectionOptions::default()),
+            tls: None,
+        });
+        Ok(crate::FilterAction::Continue)
+    }
+
+    fn selected_upstream_request_body_access(&self) -> crate::BodyAccess {
+        crate::BodyAccess::ReadWrite
+    }
+
+    fn request_body_mode(&self) -> crate::BodyMode {
+        crate::BodyMode::StreamBuffer { max_bytes: Some(64) }
+    }
+
+    async fn on_selected_upstream_request_body(
+        &self,
+        _ctx: &mut crate::HttpFilterContext<'_>,
+        body: &mut Option<bytes::Bytes>,
+    ) -> Result<crate::SelectedUpstreamBodyOutcome, crate::FilterError> {
+        *body = Some(bytes::Bytes::from_static(self.output));
+        Ok(crate::SelectedUpstreamBodyOutcome::Continue)
+    }
+}
+
 #[tokio::test]
 #[expect(clippy::large_futures, reason = "drives the full executor future in a test")]
 async fn run_re_pins_staged_upstream_over_chain_filter_rewrite() {
@@ -2624,4 +2715,122 @@ async fn abnormal_completion_over_ceiling_is_classified_too_large() {
             panic!("an 8-byte completion body must breach the 4-byte ceiling")
         },
     }
+}
+
+#[tokio::test]
+#[expect(clippy::large_futures, reason = "drives the full executor future in a test")]
+async fn selected_upstream_reject_short_circuits_before_dialing() {
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    use praxis_core::subrequest::{SubRequestClient, SubRequestConnector};
+
+    // Point the selected upstream at a dead port: if the phase's rejection did
+    // not short-circuit, the executor would dial and classify a connect failure
+    // as 502. A 403 proves the phase rejected before any dial.
+    let dead = {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        listener.local_addr().unwrap()
+    };
+
+    let mut registry = crate::FilterRegistry::with_builtins();
+    registry
+        .register(
+            "test_selected_upstream_reject",
+            crate::FilterFactory::Http(Arc::new(move |_| {
+                Ok(Box::new(SelectedUpstreamRejectFilter { upstream_addr: dead }))
+            })),
+        )
+        .unwrap();
+    let mut entries: Vec<crate::FilterEntry> =
+        serde_yaml::from_str("- filter: test_selected_upstream_reject").unwrap();
+    let pipeline = Arc::new(crate::FilterPipeline::build(&mut entries, &registry).unwrap());
+
+    let client = SubRequestClient::new(SubRequestConnector::new(1, None));
+    let downstream = crate::SubrequestRuntime::new(None, false, None, Instant::now());
+    let executor =
+        crate::FilteredSubrequestExecutor::for_callout(client, downstream, 0, 1_048_576, Duration::from_secs(5));
+
+    let request = crate::SubRequest {
+        method: http::Method::POST,
+        uri: http::Uri::from_static("/"),
+        headers: HeaderMap::new(),
+        body: bytes::Bytes::from_static(b"blocked"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    let response = match executor
+        .run(&pipeline, &request, crate::RequestExtensions::default(), deadline)
+        .await
+        .expect("run should return the local rejection")
+    {
+        crate::CalloutResponse::Buffered(response) => response,
+        crate::CalloutResponse::Streaming { .. } => panic!("a local rejection must be buffered"),
+    };
+
+    assert_eq!(
+        response.status, 403,
+        "the selected-upstream phase rejection returns 403 with no upstream dial"
+    );
+}
+
+#[tokio::test]
+#[expect(clippy::large_futures, reason = "drives the full executor future in a test")]
+async fn selected_upstream_oversized_output_is_rejected_with_413() {
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    use praxis_core::subrequest::{SubRequestClient, SubRequestConnector};
+
+    let dead = {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        listener.local_addr().unwrap()
+    };
+
+    let mut registry = crate::FilterRegistry::with_builtins();
+    registry
+        .register(
+            "test_selected_upstream_expand",
+            crate::FilterFactory::Http(Arc::new(move |_| {
+                Ok(Box::new(SelectedUpstreamExpandFilter {
+                    upstream_addr: dead,
+                    output: b"OVERSIZED_OUTPUT_THAT_IS_DELIBERATELY_LONGER_THAN_THE_SIXTY_FOUR_BYTE_STREAM_BUFFER_LIMIT_XXXX",
+                }))
+            })),
+        )
+        .unwrap();
+    let mut entries: Vec<crate::FilterEntry> =
+        serde_yaml::from_str("- filter: test_selected_upstream_expand").unwrap();
+    let pipeline = Arc::new(crate::FilterPipeline::build(&mut entries, &registry).unwrap());
+
+    let client = SubRequestClient::new(SubRequestConnector::new(1, None));
+    let downstream = crate::SubrequestRuntime::new(None, false, None, Instant::now());
+    let executor =
+        crate::FilteredSubrequestExecutor::for_callout(client, downstream, 0, 1_048_576, Duration::from_secs(5));
+
+    let request = crate::SubRequest {
+        method: http::Method::POST,
+        uri: http::Uri::from_static("/"),
+        headers: HeaderMap::new(),
+        body: bytes::Bytes::from_static(b"tiny"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    let response = match executor
+        .run(&pipeline, &request, crate::RequestExtensions::default(), deadline)
+        .await
+        .expect("run should return the 413 rejection")
+    {
+        crate::CalloutResponse::Buffered(response) => response,
+        crate::CalloutResponse::Streaming { .. } => panic!("a 413 rejection must be buffered"),
+    };
+
+    assert_eq!(
+        response.status, 413,
+        "adapted output over the effective limit is rejected with 413 before dialing"
+    );
 }
