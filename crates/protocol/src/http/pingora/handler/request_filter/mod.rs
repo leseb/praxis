@@ -8,7 +8,7 @@ use std::{borrow::Cow, collections::VecDeque, sync::Arc};
 use bytes::Bytes;
 use pingora_core::Result;
 use pingora_proxy::Session;
-use praxis_core::{config::ABSOLUTE_MAX_BODY_BYTES, connectivity::normalize_mapped_ipv4};
+use praxis_core::connectivity::normalize_mapped_ipv4;
 use praxis_filter::{
     BodyMode, FilterAction, FilterError, FilterPipeline, Rejection, Request, StreamingTerminalResponse,
     TerminalResponse, TrustedHeaderMutation,
@@ -1235,6 +1235,7 @@ mod tests {
     use praxis_filter::FilterRegistry;
 
     use super::*;
+    use praxis_core::config::ABSOLUTE_MAX_BODY_BYTES;
 
     #[tokio::test]
     async fn empty_pipeline_continues() {
