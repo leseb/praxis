@@ -1129,6 +1129,102 @@ fn error_into_parts_scrubs_selected_application() {
     );
 }
 
+#[test]
+fn into_parent_extensions_scrubs_selected_application() {
+    use std::sync::Arc;
+
+    // Direction-2 exit scrub (Correction 1): success-path `into_parent_extensions`
+    // must not carry the child's selected-application metadata back to the parent.
+    let registry = crate::FilterRegistry::with_builtins();
+    let pipeline = Arc::new(crate::FilterPipeline::build(&mut [], &registry).unwrap());
+    let request_snapshot = crate::Request {
+        headers: HeaderMap::new(),
+        method: http::Method::GET,
+        uri: http::Uri::from_static("/"),
+    };
+    let response_snapshot = crate::Response {
+        headers: HeaderMap::new(),
+        status: http::StatusCode::OK,
+    };
+    let mut extensions = crate::RequestExtensions::default();
+    extensions.insert(crate::extensions::SelectedClusterApplication::new(None, Some(Arc::from("leak"))).unwrap());
+
+    let continuation = super::continuation::FilteredSubrequestContinuation {
+        pipeline,
+        request_snapshot,
+        response_snapshot,
+        extensions,
+        filter_state: std::collections::HashMap::new(),
+        filter_results: std::collections::HashMap::new(),
+        filter_metadata: std::collections::HashMap::new(),
+        structured_metadata: std::collections::HashMap::new(),
+        executed_filter_indices: Vec::new(),
+        body_done_indices: Vec::new(),
+        response_body_bytes: 0,
+        response_body_mode: crate::body::BodyMode::Stream,
+        completed: false,
+        client_addr: None,
+        downstream_tls: false,
+        request_start: std::time::Instant::now(),
+        step_deadline: std::time::Instant::now(),
+        peer_identity: None,
+    };
+
+    let extensions = continuation.into_parent_extensions();
+    assert!(
+        extensions.get::<crate::extensions::SelectedClusterApplication>().is_none(),
+        "into_parent_extensions must scrub SelectedClusterApplication before returning extensions to the parent"
+    );
+}
+
+#[test]
+fn into_completion_scrubs_selected_application() {
+    use std::sync::Arc;
+
+    // Direction-2 exit scrub (Correction 1): success-path `into_completion`
+    // must not carry the child's selected-application metadata back to the parent.
+    let registry = crate::FilterRegistry::with_builtins();
+    let pipeline = Arc::new(crate::FilterPipeline::build(&mut [], &registry).unwrap());
+    let request_snapshot = crate::Request {
+        headers: HeaderMap::new(),
+        method: http::Method::GET,
+        uri: http::Uri::from_static("/"),
+    };
+    let response_snapshot = crate::Response {
+        headers: HeaderMap::new(),
+        status: http::StatusCode::OK,
+    };
+    let mut extensions = crate::RequestExtensions::default();
+    extensions.insert(crate::extensions::SelectedClusterApplication::new(None, Some(Arc::from("leak"))).unwrap());
+
+    let continuation = super::continuation::FilteredSubrequestContinuation {
+        pipeline,
+        request_snapshot,
+        response_snapshot,
+        extensions,
+        filter_state: std::collections::HashMap::new(),
+        filter_results: std::collections::HashMap::new(),
+        filter_metadata: std::collections::HashMap::new(),
+        structured_metadata: std::collections::HashMap::new(),
+        executed_filter_indices: Vec::new(),
+        body_done_indices: Vec::new(),
+        response_body_bytes: 0,
+        response_body_mode: crate::body::BodyMode::Stream,
+        completed: true,
+        client_addr: None,
+        downstream_tls: false,
+        request_start: std::time::Instant::now(),
+        step_deadline: std::time::Instant::now(),
+        peer_identity: None,
+    };
+
+    let completion = continuation.into_completion();
+    assert!(
+        completion.extensions.get::<crate::extensions::SelectedClusterApplication>().is_none(),
+        "into_completion must scrub SelectedClusterApplication before returning extensions to the parent"
+    );
+}
+
 #[tokio::test]
 #[expect(clippy::large_futures, reason = "drives the full executor future in a test")]
 async fn run_re_pins_staged_upstream_over_chain_filter_rewrite() {
