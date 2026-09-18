@@ -190,17 +190,84 @@ impl<'a> ChainBindingContext<'a> {
         }
     }
 
+    /// Run `f` with a standalone binding context: no top-level named chains, a
+    /// fresh cycle-detection stack, and fresh budgets, using the given registry
+    /// and insecure posture at outbound depth zero.
+    ///
+    /// This is the fallback for a registry factory that needs a
+    /// [`ChainBindingContext`] but is invoked outside a chain-aware build — e.g.
+    /// [`FilterRegistry::create`], or building an `iterative_request_router`
+    /// directly (its `from_config`/test entry points). With no containing build
+    /// to inherit from, named-chain resolution is unavailable and every shared
+    /// budget starts empty; the real listener path builds through
+    /// [`FilterPipeline::build_with_chains`], which threads the true context.
+    ///
+    /// [`FilterRegistry::create`]: crate::FilterRegistry
+    /// [`FilterPipeline::build_with_chains`]: crate::FilterPipeline::build_with_chains
+    pub(crate) fn with_standalone<R>(
+        registry: &FilterRegistry,
+        insecure: &InsecureOptions,
+        f: impl FnOnce(&ChainBindingContext<'_>) -> R,
+    ) -> R {
+        let chains: HashMap<&str, &[FilterEntry]> = HashMap::new();
+        let stack = ResolutionStack::new();
+        let budget = Cell::new(0);
+        let branch_budget = Cell::new(0);
+        let ctx = ChainBindingContext::new(registry, &chains, &stack, 0, insecure, &budget, &branch_budget);
+        f(&ctx)
+    }
+
+    /// Build a nested step pipeline (an `iterative_request_router` step) as a
+    /// continuation of the containing build, reusing this context's registry,
+    /// named-chain table, cycle-detection stack, insecure posture, and shared
+    /// materialization/branch budgets.
+    ///
+    /// Unlike [`bind_chain`], the caller supplies the step's own filter entries
+    /// rather than a [`ChainRef`]: an IRR step is not an outbound-chain binding,
+    /// so no cycle-detection name is pushed here and no outbound-chain-only
+    /// validation (terminal-filter rejection, HTTP-only enforcement) applies —
+    /// IRR runs the step through its own structural checks. Threading the shared
+    /// state is the point: a chain-binding filter nested in a step resolves
+    /// top-level named chains, and cycles, outbound nesting limits, and the
+    /// global filter/branch budgets carry across the IRR boundary rather than
+    /// resetting.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FilterError`] if any step filter fails to build, a nested chain
+    /// reference is unknown or forms a cycle, or a shared budget is exceeded.
+    ///
+    /// [`bind_chain`]: Self::bind_chain
+    /// [`ChainRef`]: praxis_core::config::ChainRef
+    pub(crate) fn build_nested_step_pipeline(
+        &self,
+        entries: &mut [FilterEntry],
+    ) -> Result<FilterPipeline, FilterError> {
+        // Each step is an independent pipeline executed on its own sub-request,
+        // so filter IDs and branch nesting restart at zero (as for an outbound
+        // binding). The *outbound* depth is forwarded unchanged — a step is a
+        // continuation, not another outbound level — as are the shared cycle
+        // stack and materialization/branch budgets, so crossing into a step
+        // cannot reset the containing build's limits.
+        let mut next_filter_id: usize = 0;
+        let filters = crate::pipeline::build_branch::resolve_chain_filters_with_stack(
+            entries,
+            self.registry,
+            self.chains,
+            0,
+            &mut next_filter_id,
+            self.insecure,
+            self.stack,
+            self.budget,
+            self.branch_budget,
+            self.outbound_depth,
+        )?;
+        Ok(FilterPipeline::from_filters(filters))
+    }
+
     /// The active registry, used by the builder to instantiate filters.
     pub(crate) fn registry(&self) -> &'a FilterRegistry {
         self.registry
-    }
-
-    /// The operator's declared insecure posture, threaded so a registry factory
-    /// that builds nested step pipelines (e.g. `iterative_request_router`) gates
-    /// their inline outbound clusters by the same SSRF/TLS-verify rules as the
-    /// containing build, rather than an unconditional strict default.
-    pub(crate) fn insecure_options(&self) -> &'a InsecureOptions {
-        self.insecure
     }
 
     /// Resolve a chain reference into a prebuilt outbound [`FilterPipeline`].

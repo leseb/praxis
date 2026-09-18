@@ -68,8 +68,8 @@ use self::{
     streaming::{IrrStreamingSession, ensure_combined_retained_limit, step_completion_from},
 };
 use crate::{
-    FilterEntry, FilterError, FilterPipeline, FilterRegistry, IterationState, NextIterationBody, RequestExtensions,
-    StreamTermination, SubRequest, SubResponse,
+    ChainBindingContext, FilterEntry, FilterError, FilterPipeline, FilterRegistry, IterationState, NextIterationBody,
+    RequestExtensions, StreamTermination, SubRequest, SubResponse,
     actions::{FilterAction, Rejection, StreamingResponseBody as _, StreamingTerminalResponse, TerminalResponse},
     extensions::SelectedClusterApplication,
     factory::parse_filter_config,
@@ -215,11 +215,13 @@ impl IterativeRequestRouterFilter {
     /// pipelines fail to build.
     pub fn from_config(value: &serde_yaml::Value) -> Result<Box<dyn HttpFilter>, FilterError> {
         let cfg: IterativeRequestRouterConfig = parse_filter_config("iterative_request_router", value)?;
-        Self::from_parsed_config(
-            cfg,
-            &FilterRegistry::with_builtins(),
-            &praxis_core::config::InsecureOptions::default(),
-        )
+        let registry = FilterRegistry::with_builtins();
+        // No containing build, so a standalone context: no top-level named chains
+        // and the strict default posture. The real listener path builds through
+        // `from_config_with_binding`, which threads the true context.
+        ChainBindingContext::with_standalone(&registry, &praxis_core::config::InsecureOptions::default(), |ctx| {
+            Self::from_parsed_config(cfg, ctx)
+        })
     }
 
     /// Create from YAML config, resolving step filters through the
@@ -240,31 +242,58 @@ impl IterativeRequestRouterFilter {
         Self::from_config_with_registry_and_insecure(value, registry, &praxis_core::config::InsecureOptions::default())
     }
 
-    /// Registry factory: create from YAML config, resolving step filters through
-    /// the containing registry and gating each step's inline outbound clusters by
-    /// the operator's declared `insecure` posture.
+    /// Create from YAML config using a standalone binding context built from the
+    /// given registry and `insecure` posture (no top-level named chains).
     ///
-    /// This is the entry point the [`FilterRegistry`] invokes for the real
-    /// listener build, where `insecure` carries the operator's actual
-    /// [`InsecureOptions`] (SSRF/TLS-verify/private-upstream toggles) rather than
-    /// an unconditional strict default.
+    /// Used for direct construction outside a chain-aware build — the public
+    /// [`from_config`] path and tests. The real listener build goes through
+    /// [`from_config_with_binding`], which threads the containing
+    /// [`ChainBindingContext`] so steps can resolve top-level named chains and
+    /// share the build's cycle stack and budgets.
     ///
-    /// [`InsecureOptions`]: praxis_core::config::InsecureOptions
+    /// [`from_config`]: Self::from_config
+    /// [`from_config_with_binding`]: Self::from_config_with_binding
+    #[cfg(test)]
     pub(crate) fn from_config_with_registry_and_insecure(
         value: &serde_yaml::Value,
         registry: &FilterRegistry,
         insecure: &praxis_core::config::InsecureOptions,
     ) -> Result<Box<dyn HttpFilter>, FilterError> {
         let cfg: IterativeRequestRouterConfig = parse_filter_config("iterative_request_router", value)?;
-        Self::from_parsed_config(cfg, registry, insecure)
+        ChainBindingContext::with_standalone(registry, insecure, |ctx| Self::from_parsed_config(cfg, ctx))
+    }
+
+    /// Registry factory: build the router as a continuation of the containing
+    /// pipeline build, threading its [`ChainBindingContext`] into each step.
+    ///
+    /// This is the entry point the [`FilterRegistry`] invokes for the real
+    /// listener build (through [`FilterPipeline::build_with_chains`]). Threading
+    /// the containing context is what lets a chain-binding filter nested in a
+    /// step resolve a top-level named `filter_chain`, and keeps cycle detection,
+    /// outbound-nesting limits, and the materialization/branch budgets shared
+    /// across the IRR boundary. Inline outbound clusters are gated by the
+    /// operator's declared [`InsecureOptions`] carried on the context.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FilterError`] if the config is invalid or a step pipeline fails
+    /// to build.
+    ///
+    /// [`InsecureOptions`]: praxis_core::config::InsecureOptions
+    /// [`FilterPipeline::build_with_chains`]: crate::FilterPipeline::build_with_chains
+    pub(crate) fn from_config_with_binding(
+        value: &serde_yaml::Value,
+        ctx: &ChainBindingContext<'_>,
+    ) -> Result<Box<dyn HttpFilter>, FilterError> {
+        let cfg: IterativeRequestRouterConfig = parse_filter_config("iterative_request_router", value)?;
+        Self::from_parsed_config(cfg, ctx)
     }
 
     /// Validate parsed configuration and build each step pipeline.
     #[expect(clippy::too_many_lines, reason = "validation and named step construction")]
     fn from_parsed_config(
         cfg: IterativeRequestRouterConfig,
-        registry: &FilterRegistry,
-        insecure: &praxis_core::config::InsecureOptions,
+        ctx: &ChainBindingContext<'_>,
     ) -> Result<Box<dyn HttpFilter>, FilterError> {
         config::validate(&cfg)?;
         let timeout = Duration::from_millis(cfg.timeout_ms);
@@ -283,18 +312,18 @@ impl IterativeRequestRouterFilter {
             let name: Arc<str> = Arc::from(step.name.as_str());
 
             let mut entries: Vec<FilterEntry> = step.filters.into_iter().collect();
-            // Build the step pipeline chain-aware so a chain-binding filter (an
-            // application callout that owns a prebuilt outbound subrequest chain,
-            // e.g. `openai_web_search`) nested in a step resolves its inline
-            // `outbound_chain` at construction time instead of being rejected by
-            // the plain build path. Steps reference their outbound chains inline,
-            // so an empty top-level chain map suffices. Build-time inline-cluster
-            // SSRF/TLS gating uses the operator's declared posture (`insecure`),
-            // threaded from the containing build so a nested outbound chain is
-            // held to the same rules as a top-level one — runtime
-            // `apply_insecure_options` runs too late to undo a build rejection.
-            let step_chains: HashMap<&str, &[FilterEntry]> = HashMap::new();
-            let pipeline = FilterPipeline::build_with_chains(&mut entries, registry, &step_chains, insecure)?;
+            // Build the step pipeline as a continuation of the containing build so
+            // a chain-binding filter (an application callout that owns a prebuilt
+            // outbound subrequest chain, e.g. `openai_web_search`) nested in a step
+            // resolves its `outbound_chain` — whether inline or a reference to a
+            // top-level named `filter_chain` — instead of being rejected by the
+            // plain build path. Threading the containing `ChainBindingContext`
+            // keeps cycle detection, outbound-nesting limits, and the shared
+            // materialization/branch budgets from resetting at the IRR boundary,
+            // and gates inline outbound clusters (SSRF/TLS-verify) by the
+            // operator's declared posture — runtime `apply_insecure_options` runs
+            // too late to undo a build rejection.
+            let pipeline = ctx.build_nested_step_pipeline(&mut entries)?;
             let ordering_errors =
                 pipeline.ordering_errors(&entries, false, &praxis_core::config::SkipPipelineChecks::default());
             if !ordering_errors.is_empty() {

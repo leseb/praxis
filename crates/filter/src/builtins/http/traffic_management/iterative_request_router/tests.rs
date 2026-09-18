@@ -4012,3 +4012,291 @@ fn step_outbound_chain_ssrf_endpoint_allowed_with_flag() {
     super::IterativeRequestRouterFilter::from_config_with_registry_and_insecure(&yaml, &registry, &insecure)
         .expect("an IRR step whose outbound chain opts in to a private endpoint must build");
 }
+
+// -----------------------------------------------------------------------------
+// Step outbound chains resolve against the top-level named `filter_chains`
+//
+// An IRR step is built as a continuation of the containing pipeline build, so a
+// chain-binding filter nested in a step resolves top-level named chains, and the
+// shared cycle stack and materialization budget carry across the IRR boundary
+// rather than resetting. These tests drive construction through
+// `build_with_chains` — the same path the server uses — so the containing
+// `ChainBindingContext` (registry, named-chain table, cycle stack, budgets) is
+// threaded into step construction.
+// -----------------------------------------------------------------------------
+
+/// A trivial application-registered HTTP filter, used to prove that
+/// application-registered filters resolve through the live registry even when
+/// they sit inside a named chain bound from within an IRR step.
+struct MarkerFilter;
+
+#[async_trait::async_trait]
+impl crate::HttpFilter for MarkerFilter {
+    fn name(&self) -> &'static str {
+        "test_marker"
+    }
+
+    async fn on_request(
+        &self,
+        _ctx: &mut crate::HttpFilterContext<'_>,
+    ) -> Result<crate::FilterAction, crate::FilterError> {
+        Ok(crate::FilterAction::Continue)
+    }
+}
+
+/// Registry with the chain-binding `test_outbound_callout` (recording the length
+/// of the pipeline it binds) plus an application-registered `test_marker`.
+fn recording_callout_registry(bound_len: std::sync::Arc<std::sync::Mutex<Option<usize>>>) -> crate::FilterRegistry {
+    let mut registry = crate::FilterRegistry::with_builtins();
+    registry
+        .register(
+            "test_marker",
+            crate::FilterFactory::Http(std::sync::Arc::new(
+                |_: &serde_yaml::Value| -> Result<Box<dyn crate::HttpFilter>, crate::FilterError> {
+                    Ok(Box::new(MarkerFilter))
+                },
+            )),
+        )
+        .unwrap();
+    registry
+        .register_chain_binding(
+            "test_outbound_callout",
+            std::sync::Arc::new(
+                move |config: &serde_yaml::Value, ctx: &crate::ChainBindingContext<'_>| {
+                    let raw = config
+                        .get("outbound_chain")
+                        .cloned()
+                        .ok_or_else(|| crate::FilterError::from("missing outbound_chain"))?;
+                    let chain_ref: praxis_core::config::ChainRef = serde_yaml::from_value(raw)
+                        .map_err(|e| crate::FilterError::from(format!("bad outbound_chain: {e}")))?;
+                    let outbound = ctx.bind_chain(&chain_ref)?;
+                    *bound_len.lock().unwrap() = Some(outbound.len());
+                    let filter: Box<dyn crate::HttpFilter> = Box::new(OutboundCalloutFilter {
+                        outbound: std::sync::Arc::new(outbound),
+                    });
+                    Ok(filter)
+                },
+            ),
+        )
+        .unwrap();
+    registry
+}
+
+/// Build a top-level pipeline from YAML entries plus a named-chain table via the
+/// server's chain-aware `build_with_chains` path, so step construction runs with
+/// the real containing `ChainBindingContext`.
+fn build_top_level_with_chains(
+    registry: &crate::FilterRegistry,
+    top_yaml: &str,
+    chains_yaml: &[(&str, &str)],
+) -> Result<crate::FilterPipeline, crate::FilterError> {
+    let mut entries: Vec<crate::FilterEntry> = serde_yaml::from_str(top_yaml).unwrap();
+    let chain_entries: Vec<(&str, Vec<crate::FilterEntry>)> = chains_yaml
+        .iter()
+        .map(|(name, yaml)| (*name, serde_yaml::from_str(yaml).unwrap()))
+        .collect();
+    let chains: std::collections::HashMap<&str, &[crate::FilterEntry]> = chain_entries
+        .iter()
+        .map(|(name, entries)| (*name, entries.as_slice()))
+        .collect();
+    crate::FilterPipeline::build_with_chains(
+        &mut entries,
+        registry,
+        &chains,
+        &praxis_core::config::InsecureOptions::default(),
+    )
+}
+
+#[test]
+fn step_chain_binding_filter_resolves_top_level_named_chain() {
+    let bound_len = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let registry = recording_callout_registry(std::sync::Arc::clone(&bound_len));
+
+    let top = "
+- filter: iterative_request_router
+  initial_step: s
+  steps:
+    - name: s
+      filters:
+        - filter: test_outbound_callout
+          outbound_chain: shared_outbound
+      on_result:
+        - default: true
+          done: true
+";
+    // A benign named outbound chain (no clusters, so no router/SSRF concerns),
+    // one of whose filters is application-registered. Resolving it proves both
+    // that a step reaches the top-level `filter_chains` and that nested filters
+    // resolve through the live registry across the IRR boundary.
+    let chains = [(
+        "shared_outbound",
+        "
+- filter: request_id
+- filter: test_marker
+",
+    )];
+
+    build_top_level_with_chains(&registry, top, &chains)
+        .expect("a chain-binding filter in an IRR step must resolve a top-level named filter_chain");
+    assert_eq!(
+        *bound_len.lock().unwrap(),
+        Some(2),
+        "the bound named chain must resolve to both of its filters, including the app-registered one"
+    );
+}
+
+#[test]
+fn step_chain_binding_filter_inline_chain_still_resolves() {
+    let bound_len = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let registry = recording_callout_registry(std::sync::Arc::clone(&bound_len));
+
+    // Inline outbound chains must keep working through the chain-aware path even
+    // when a top-level named chain is also present.
+    let top = "
+- filter: iterative_request_router
+  initial_step: s
+  steps:
+    - name: s
+      filters:
+        - filter: test_outbound_callout
+          outbound_chain:
+            name: inline
+            filters:
+              - filter: request_id
+      on_result:
+        - default: true
+          done: true
+";
+    build_top_level_with_chains(&registry, top, &[("unused_named", "- filter: request_id")])
+        .expect("an inline outbound chain in an IRR step must still resolve");
+    assert_eq!(
+        *bound_len.lock().unwrap(),
+        Some(1),
+        "the inline outbound chain must resolve to its single filter"
+    );
+}
+
+#[test]
+fn step_chain_binding_filter_unknown_named_chain_rejected() {
+    let bound_len = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let registry = recording_callout_registry(std::sync::Arc::clone(&bound_len));
+
+    let top = "
+- filter: iterative_request_router
+  initial_step: s
+  steps:
+    - name: s
+      filters:
+        - filter: test_outbound_callout
+          outbound_chain: does_not_exist
+      on_result:
+        - default: true
+          done: true
+";
+    let err = build_top_level_with_chains(&registry, top, &[("shared_outbound", "- filter: request_id")])
+        .err()
+        .expect("an unknown named chain referenced from an IRR step must fail the build");
+    assert!(
+        err.to_string().contains("unknown chain"),
+        "an unknown named outbound chain must be rejected at build time: {err}"
+    );
+}
+
+#[test]
+fn cycle_across_irr_step_and_named_chain_rejected() {
+    let bound_len = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let registry = recording_callout_registry(std::sync::Arc::clone(&bound_len));
+
+    // A top-level filter whose (unconditional) branch enters the named chain
+    // `loop`. The chain holds an IRR whose step binds `loop` again — the cycle
+    // closes only because the shared cycle-detection stack is threaded across
+    // the IRR/step boundary. A per-step fresh stack would instead recurse until
+    // the instance budget or the process stack is exhausted.
+    let top = "
+- filter: request_id
+  branch_chains:
+    - name: b
+      chains:
+        - loop
+";
+    let chains = [(
+        "loop",
+        "
+- filter: iterative_request_router
+  initial_step: s
+  steps:
+    - name: s
+      filters:
+        - filter: test_outbound_callout
+          outbound_chain: loop
+      on_result:
+        - default: true
+          done: true
+",
+    )];
+    let err = build_top_level_with_chains(&registry, top, &chains)
+        .err()
+        .expect("a chain reference cycle crossing the IRR boundary must be rejected");
+    assert!(
+        err.to_string().contains("cycle"),
+        "the cross-boundary cycle must be reported deterministically as a cycle: {err}"
+    );
+}
+
+#[test]
+fn irr_steps_share_materialization_budget_across_named_chains() {
+    let bound_len = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let registry = recording_callout_registry(std::sync::Arc::clone(&bound_len));
+
+    // Each step binds the same ~56k-instance named fan-out. Two steps together
+    // exceed the shared 100k ceiling, but only if the materialization budget is
+    // threaded across the IRR boundary rather than reset per step.
+    let top = "
+- filter: iterative_request_router
+  initial_step: s1
+  steps:
+    - name: s1
+      filters:
+        - filter: test_outbound_callout
+          outbound_chain: outbound
+      on_result:
+        - default: true
+          next: s2
+    - name: s2
+      filters:
+        - filter: test_outbound_callout
+          outbound_chain: outbound
+      on_result:
+        - default: true
+          done: true
+";
+    // Nested fan-out chains: outbound -> c3 (x7) -> c2 (x20) -> c1 (x20) ->
+    // leaf (x20), materializing 7*20*20*20 = 56000 instances per binding.
+    let fanout = |target: &str, refs: usize, branch: &str| -> String {
+        let mut chain = String::from("- filter: request_id\n  branch_chains:\n    - name: ");
+        chain.push_str(branch);
+        chain.push_str("\n      chains:\n");
+        for _ in 0..refs {
+            chain.push_str("        - ");
+            chain.push_str(target);
+            chain.push('\n');
+        }
+        chain
+    };
+    let chains = [
+        ("leaf", "- filter: request_id".to_owned()),
+        ("c1", fanout("leaf", 20, "b1")),
+        ("c2", fanout("c1", 20, "b2")),
+        ("c3", fanout("c2", 20, "b3")),
+        ("outbound", fanout("c3", 7, "b_out")),
+    ];
+    let chains: Vec<(&str, &str)> = chains.iter().map(|(name, yaml)| (*name, yaml.as_str())).collect();
+
+    let err = build_top_level_with_chains(&registry, top, &chains)
+        .err()
+        .expect("two ~56k step bindings must exceed the shared 100k materialization budget");
+    assert!(
+        err.to_string().contains("filter instances"),
+        "the materialization budget must not reset when crossing an IRR step boundary: {err}"
+    );
+}
