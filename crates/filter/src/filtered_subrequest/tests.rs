@@ -3137,3 +3137,307 @@ async fn selected_upstream_oversized_output_is_rejected_with_413() {
         "adapted output over the effective limit is rejected with 413 before dialing"
     );
 }
+
+// -----------------------------------------------------------------------------
+// Test Utilities: selected-upstream body-phase re-pin and retained-state ceiling
+// -----------------------------------------------------------------------------
+
+// A malicious selected-upstream body filter that rewrites `ctx.upstream` during
+// the body phase — after the pre-phase re-pin — to redirect a body already
+// adapted for the pinned destination. The executor's post-phase re-pin must
+// defeat it, one boundary later than the request-phase UpstreamHijackFilter.
+struct SelectedUpstreamBodyHijackFilter {
+    redirect_to: std::net::SocketAddr,
+}
+
+#[async_trait::async_trait]
+impl crate::HttpFilter for SelectedUpstreamBodyHijackFilter {
+    fn name(&self) -> &'static str {
+        "test_selected_upstream_body_hijack"
+    }
+
+    // No-op: the staged upstream (seeded from extensions) is the pinned
+    // destination; the rewrite happens later, in the body phase.
+    async fn on_request(
+        &self,
+        _ctx: &mut crate::HttpFilterContext<'_>,
+    ) -> Result<crate::FilterAction, crate::FilterError> {
+        Ok(crate::FilterAction::Continue)
+    }
+
+    fn selected_upstream_request_body_access(&self) -> crate::BodyAccess {
+        crate::BodyAccess::ReadOnly
+    }
+
+    fn request_body_mode(&self) -> crate::BodyMode {
+        crate::BodyMode::StreamBuffer { max_bytes: Some(4096) }
+    }
+
+    async fn on_selected_upstream_request_body(
+        &self,
+        ctx: &mut crate::HttpFilterContext<'_>,
+        _body: &mut Option<bytes::Bytes>,
+    ) -> Result<crate::SelectedUpstreamBodyOutcome, crate::FilterError> {
+        ctx.upstream = Some(praxis_core::connectivity::Upstream {
+            address: std::sync::Arc::from(self.redirect_to.to_string().as_str()),
+            authority: None,
+            connection: std::sync::Arc::new(praxis_core::connectivity::ConnectionOptions::default()),
+            tls: None,
+        });
+        Ok(crate::SelectedUpstreamBodyOutcome::Continue)
+    }
+}
+
+// Retained-state accounting mirroring the IRR's `IterationAccounting`: it caps
+// the bytes retained in `IterationState`. Lets a unit test prove the executor
+// enforces the ceiling at the selected-upstream body boundary like every other
+// boundary, without reaching into the router's private accounting type.
+struct IterationStateCeiling {
+    max_state_bytes: usize,
+}
+
+impl super::RetainedStateAccounting for IterationStateCeiling {
+    fn exceeds_limit(&self, extensions: &crate::RequestExtensions) -> bool {
+        extensions
+            .get::<crate::IterationState>()
+            .is_some_and(|state| state.retained_bytes() > self.max_state_bytes)
+    }
+}
+
+// Selects a fixed upstream in `on_request` and, during the selected-upstream body
+// phase, inserts an oversized `IterationState` — the retained-state growth the
+// executor's post-phase accounting check must reject with 413 before dialing.
+struct SelectedUpstreamStateExpandFilter {
+    upstream_addr: std::net::SocketAddr,
+    accumulator_bytes: usize,
+}
+
+#[async_trait::async_trait]
+impl crate::HttpFilter for SelectedUpstreamStateExpandFilter {
+    fn name(&self) -> &'static str {
+        "test_selected_upstream_state_expand"
+    }
+
+    async fn on_request(
+        &self,
+        ctx: &mut crate::HttpFilterContext<'_>,
+    ) -> Result<crate::FilterAction, crate::FilterError> {
+        ctx.upstream = Some(praxis_core::connectivity::Upstream {
+            address: std::sync::Arc::from(self.upstream_addr.to_string().as_str()),
+            authority: None,
+            connection: std::sync::Arc::new(praxis_core::connectivity::ConnectionOptions::default()),
+            tls: None,
+        });
+        Ok(crate::FilterAction::Continue)
+    }
+
+    fn selected_upstream_request_body_access(&self) -> crate::BodyAccess {
+        crate::BodyAccess::ReadOnly
+    }
+
+    fn request_body_mode(&self) -> crate::BodyMode {
+        crate::BodyMode::StreamBuffer { max_bytes: Some(4096) }
+    }
+
+    async fn on_selected_upstream_request_body(
+        &self,
+        ctx: &mut crate::HttpFilterContext<'_>,
+        _body: &mut Option<bytes::Bytes>,
+    ) -> Result<crate::SelectedUpstreamBodyOutcome, crate::FilterError> {
+        let mut accumulator = std::collections::HashMap::new();
+        accumulator.insert(
+            "bloat".to_owned(),
+            bytes::Bytes::from(vec![b'x'; self.accumulator_bytes]),
+        );
+        ctx.extensions.insert(crate::IterationState {
+            original_request: praxis_core::subrequest::SubRequest {
+                method: http::Method::POST,
+                uri: http::Uri::from_static("/"),
+                headers: HeaderMap::new(),
+                body: bytes::Bytes::new(),
+            },
+            previous_response: None,
+            accumulator,
+            iteration: 0,
+            max_iterations: 1,
+            deadline: std::time::Instant::now() + std::time::Duration::from_secs(5),
+            max_response_bytes: 1_048_576,
+            depth: 0,
+        });
+        Ok(crate::SelectedUpstreamBodyOutcome::Continue)
+    }
+}
+
+#[tokio::test]
+#[expect(clippy::large_futures, reason = "drives the full executor future in a test")]
+async fn selected_upstream_phase_re_pins_staged_upstream_over_body_filter_rewrite() {
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    use praxis_core::subrequest::{SubRequestClient, SubRequestConnector};
+
+    // Two distinguishable live backends: the staged destination and the
+    // attacker's. A body-phase filter rewrites `ctx.upstream` to the attacker
+    // AFTER the pre-phase re-pin; the executor's post-phase re-pin must restore
+    // the staged address so the adapted body can only reach the destination it
+    // was prepared for. Without the post-phase re-pin the callout would dial the
+    // attacker and return "hijack" — the credential-exfiltration path the
+    // invariant blocks, now reachable through the selected-upstream body phase.
+    let (staged_addr, staged_backend) = spawn_raw_backend("HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nstaged").await;
+    let (attacker_addr, attacker_backend) =
+        spawn_raw_backend("HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nhijack").await;
+
+    let mut registry = crate::FilterRegistry::with_builtins();
+    registry
+        .register(
+            "test_selected_upstream_body_hijack",
+            crate::FilterFactory::Http(Arc::new(move |_| {
+                Ok(Box::new(SelectedUpstreamBodyHijackFilter {
+                    redirect_to: attacker_addr,
+                }))
+            })),
+        )
+        .unwrap();
+    // The outbound chain carries only the body-phase hijack filter: the
+    // destination is seeded from the staged upstream, and the post-phase re-pin
+    // overrides whatever the phase wrote before transport.
+    let mut entries: Vec<crate::FilterEntry> =
+        serde_yaml::from_str("- filter: test_selected_upstream_body_hijack").unwrap();
+    let pipeline = Arc::new(crate::FilterPipeline::build(&mut entries, &registry).unwrap());
+
+    let client = SubRequestClient::new(SubRequestConnector::new(1, None));
+    let downstream = crate::SubrequestRuntime::new(None, false, None, Instant::now());
+    let executor =
+        crate::FilteredSubrequestExecutor::for_callout(client, downstream, 0, 1_048_576, Duration::from_secs(5));
+
+    let staged = super::StagedUpstream(praxis_core::connectivity::Upstream {
+        address: Arc::from(staged_addr.to_string().as_str()),
+        authority: None,
+        connection: Arc::new(praxis_core::connectivity::ConnectionOptions::default()),
+        tls: None,
+    });
+    let mut extensions = crate::RequestExtensions::default();
+    extensions.insert(staged);
+
+    let request = crate::SubRequest {
+        method: http::Method::POST,
+        uri: http::Uri::from_static("/"),
+        headers: HeaderMap::new(),
+        body: bytes::Bytes::from_static(b"adapted"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    let response = match executor
+        .run(&pipeline, &request, extensions, deadline)
+        .await
+        .expect("run should dial the staged address and return its response")
+    {
+        crate::CalloutResponse::Buffered(response) => response,
+        crate::CalloutResponse::Streaming { .. } => {
+            panic!("a buffered outbound chain must not produce a streaming response")
+        },
+    };
+    staged_backend.abort();
+    attacker_backend.abort();
+
+    assert_eq!(response.status, 200);
+    assert_eq!(
+        response.body,
+        bytes::Bytes::from_static(b"staged"),
+        "the executor must re-pin the staged address after the selected-upstream body phase, so a \
+         body filter's `ctx.upstream` rewrite cannot redirect the callout to the attacker backend"
+    );
+}
+
+#[tokio::test]
+#[expect(clippy::large_futures, reason = "drives the full executor future in a test")]
+async fn selected_upstream_phase_enforces_retained_state_ceiling() {
+    use std::{
+        sync::{Arc, Mutex},
+        time::{Duration, Instant},
+    };
+
+    use praxis_core::subrequest::{SubRequestClient, SubRequestConnector};
+
+    // Point the selected upstream at a LIVE backend that records every byte it
+    // receives. The ceiling must reject the phase's retained-state overflow
+    // BEFORE the dial, so the backend must observe nothing.
+    //
+    // Asserting status alone cannot prove the "before dialing" guarantee: a
+    // post-transport accounting checkpoint already returns 413 for the same
+    // oversized state (see mod.rs, the `execute_http_response` re-check), so a
+    // dead-port variant would report 413 whether or not the dial happened. The
+    // captured-request buffer is the discriminator — empty only if the ceiling
+    // fired before transport. Without the pre-dial check the executor dials
+    // first, the credential-bearing request body crosses the wire, and only the
+    // post-transport check then returns 413: too late for a body-authenticated
+    // provider.
+    let captured = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let (backend_addr, backend) =
+        spawn_capturing_backend("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", Arc::clone(&captured)).await;
+
+    let mut registry = crate::FilterRegistry::with_builtins();
+    registry
+        .register(
+            "test_selected_upstream_state_expand",
+            crate::FilterFactory::Http(Arc::new(move |_| {
+                Ok(Box::new(SelectedUpstreamStateExpandFilter {
+                    upstream_addr: backend_addr,
+                    // Far past the 64-byte ceiling below.
+                    accumulator_bytes: 4096,
+                }))
+            })),
+        )
+        .unwrap();
+    let mut entries: Vec<crate::FilterEntry> =
+        serde_yaml::from_str("- filter: test_selected_upstream_state_expand").unwrap();
+    let pipeline = Arc::new(crate::FilterPipeline::build(&mut entries, &registry).unwrap());
+
+    let client = SubRequestClient::new(SubRequestConnector::new(1, None));
+    let downstream = crate::SubrequestRuntime::new(None, false, None, Instant::now());
+    // Build with real (non-noop) retained-state accounting: a 64-byte ceiling the
+    // phase's inserted IterationState blows past. `for_callout` wires the noop
+    // accounting, which cannot exercise this boundary.
+    let executor = crate::FilteredSubrequestExecutor::new(
+        Box::new(IterationStateCeiling { max_state_bytes: 64 }),
+        client,
+        0,
+        downstream,
+        1_048_576,
+        1_048_576,
+        Duration::from_secs(5),
+    );
+
+    let request = crate::SubRequest {
+        method: http::Method::POST,
+        uri: http::Uri::from_static("/"),
+        headers: HeaderMap::new(),
+        body: bytes::Bytes::from_static(b"tiny"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    let response = match executor
+        .run(&pipeline, &request, crate::RequestExtensions::default(), deadline)
+        .await
+        .expect("run should return the 413 rejection")
+    {
+        crate::CalloutResponse::Buffered(response) => response,
+        crate::CalloutResponse::Streaming { .. } => panic!("a 413 rejection must be buffered"),
+    };
+    backend.abort();
+
+    assert_eq!(
+        response.status, 413,
+        "retained state grown past the ceiling during the selected-upstream body phase is \
+         rejected with 413"
+    );
+    assert!(
+        captured.lock().unwrap().is_empty(),
+        "the ceiling must reject the oversized retained state BEFORE dialing: the upstream must \
+         never be contacted, so a body-authenticated request cannot cross the wire before the \
+         413. A non-empty capture means the executor dialed first and only rejected \
+         post-transport"
+    );
+}

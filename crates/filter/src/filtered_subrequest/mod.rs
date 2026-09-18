@@ -1017,6 +1017,28 @@ impl FilteredSubrequestExecutor {
                 {
                     return Ok(RawResponse::Rejected(Rejection::status(413)));
                 }
+                // Enforce the retained-state ceiling before dialing, like every
+                // preceding filter boundary. A phase filter may have grown
+                // cross-sub-request state (for the IRR, the retained
+                // `IterationState`); an oversized retention must be rejected here
+                // rather than carried across a dial and held until the response or
+                // timeout.
+                if self.accounting.exceeds_limit(&filter_ctx.extensions) {
+                    return Ok(RawResponse::Rejected(Rejection::status(413)));
+                }
+                // Re-pin the staged upstream once more. This phase received a
+                // mutable `ctx` and may have rewritten `ctx.upstream` after the
+                // pre-phase re-pin, so reassert the prepared destination before the
+                // dial. Otherwise a body adapted for the pinned upstream — for a
+                // body-authenticated provider, the request body itself carries the
+                // credential — could be redirected to an authority the callout never
+                // prepared, the exact exfiltration the staged-upstream invariant
+                // blocks. Mirror the pre-phase re-pin: clear any discarded-selection
+                // metadata a rewrite may have republished.
+                if let Some(upstream) = &pinned_upstream {
+                    filter_ctx.upstream = Some(upstream.clone());
+                    filter_ctx.extensions.remove::<SelectedClusterApplication>();
+                }
             }
 
             let upstream = filter_ctx.upstream.as_ref().ok_or_else(|| -> FilterError {
