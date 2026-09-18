@@ -263,6 +263,19 @@ impl FilterPipeline {
     /// clamped to the listener ceiling — the same bound that governed the
     /// canonical pre-read — never an individual filter's limit. `min` keeps this
     /// correct whether or not `request_body_mode` is already clamped at build.
+    ///
+    /// ```
+    /// use praxis_core::config::ABSOLUTE_MAX_BODY_BYTES;
+    /// use praxis_filter::{FilterPipeline, FilterRegistry};
+    ///
+    /// let registry = FilterRegistry::with_builtins();
+    /// let pipeline = FilterPipeline::build(&mut [], &registry).unwrap();
+    /// assert_eq!(
+    ///     pipeline.selected_upstream_request_body_limit(),
+    ///     ABSOLUTE_MAX_BODY_BYTES,
+    ///     "an empty pipeline uses the defensive absolute limit",
+    /// );
+    /// ```
     #[must_use]
     pub fn selected_upstream_request_body_limit(&self) -> usize {
         let mode_limit = match self.body_capabilities().request_body_mode {

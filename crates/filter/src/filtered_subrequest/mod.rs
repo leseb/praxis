@@ -476,6 +476,15 @@ impl RetainedStateAccounting for NoRetainedState {
     }
 }
 
+/// Restore a caller-staged destination and discard metadata published for any
+/// load-balanced selection it replaces.
+fn repin_staged_upstream(ctx: &mut crate::HttpFilterContext<'_>, pinned_upstream: Option<&Upstream>) {
+    if let Some(upstream) = pinned_upstream {
+        ctx.upstream = Some(upstream.clone());
+        ctx.extensions.remove::<SelectedClusterApplication>();
+    }
+}
+
 /// Executes exactly one filtered sub-request and returns owned continuation state.
 pub struct FilteredSubrequestExecutor {
     /// Caller-supplied retained-state ceiling accounting.
@@ -982,14 +991,11 @@ impl FilteredSubrequestExecutor {
             // overrides any mid-chain rewrite so a staged credential — a header
             // credential, or for a body-authenticated provider the request body
             // itself — can only ever reach the authority it was prepared for.
-            if let Some(upstream) = &pinned_upstream {
-                filter_ctx.upstream = Some(upstream.clone());
-                // #1138 Correction 2: a staged upstream carries no application
-                // metadata. Any value a chain filter published for the discarded
-                // load-balancer selection would misdescribe the pinned
-                // destination, so the body phase must not read it.
-                filter_ctx.extensions.remove::<SelectedClusterApplication>();
-            }
+            // #1138 Correction 2: a staged upstream carries no application
+            // metadata. Any value a chain filter published for the discarded
+            // load-balancer selection would misdescribe the pinned destination,
+            // so the body phase must not read it.
+            repin_staged_upstream(&mut filter_ctx, pinned_upstream.as_ref());
 
             // #1138: selected-upstream request-body phase. Mirrors the Pingora
             // path (crates/protocol .../request_filter/mod.rs run_pipeline): after
@@ -1035,10 +1041,7 @@ impl FilteredSubrequestExecutor {
                 // prepared, the exact exfiltration the staged-upstream invariant
                 // blocks. Mirror the pre-phase re-pin: clear any discarded-selection
                 // metadata a rewrite may have republished.
-                if let Some(upstream) = &pinned_upstream {
-                    filter_ctx.upstream = Some(upstream.clone());
-                    filter_ctx.extensions.remove::<SelectedClusterApplication>();
-                }
+                repin_staged_upstream(&mut filter_ctx, pinned_upstream.as_ref());
             }
 
             let upstream = filter_ctx.upstream.as_ref().ok_or_else(|| -> FilterError {
