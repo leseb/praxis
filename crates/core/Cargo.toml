@@ -31,6 +31,7 @@ otel = [
 ]
 
 [dependencies]
+async-trait = { workspace = true }
 bytes = { workspace = true }
 dashmap = { workspace = true }
 http = { workspace = true }
