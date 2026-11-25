@@ -177,9 +177,10 @@ without the other; the two listeners must not overlap.
 
 - `/healthy` returns `200 OK` with `{"status":"ok"}`
   once the server is accepting connections (liveness).
-- `/ready` returns per-cluster health status with
-  healthy/unhealthy/total counts when active health
-  checks are configured. The default `readiness: serving`
+- `/ready` reports aggregate `total`, `healthy`, and `degraded`
+  cluster counts when active health checks are configured. Set
+  `admin.verbose: true` to include per-cluster endpoint counts.
+  The default `readiness: serving`
   returns `200 OK` once the replica is serving, even when
   an upstream cluster is degraded. Set `readiness: upstreams`
   to return `503 SERVICE UNAVAILABLE` when any checked cluster
@@ -187,7 +188,9 @@ without the other; the two listeners must not overlap.
   return `{"status":"ok"}`. While the replica is initializing,
   draining, or stopped, `/ready` returns `503` with
   `{"status":"initializing"}`, `{"status":"draining"}`, or
-  `{"status":"stopped"}`.
+  `{"status":"stopped"}`. When an embedded runtime service
+  exits after startup, `/ready` returns `503` with
+  `{"status":"unavailable","runtime_services":"not_ready"}`.
 - `/metrics` returns Prometheus text exposition format
   with HTTP request metrics (`praxis_http_requests_total`,
   `praxis_http_request_duration_seconds`). When
